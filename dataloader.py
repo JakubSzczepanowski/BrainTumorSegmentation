@@ -30,17 +30,16 @@ class Brain:
 def get_directory_paths(directory_path: str):
     return [f.path for f in os.scandir(directory_path) if f.is_dir()]
 
-def load_dataset_paths(train_path: str, test_path: str, validation_size: float = 0.2) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
+def load_dataset_paths(train_path: str, test_path: str, validation_size: float = 0.2) -> tuple[list[str], list[str], list[str]]:
     hgg_path = os.path.join(train_path, 'HGG')
     lgg_path = os.path.join(train_path, 'LGG')
 
-    hgg_brains = get_directory_paths(hgg_path)
+    brains = get_directory_paths(hgg_path)
     lgg_brains = get_directory_paths(lgg_path)
 
-    hgg_brains.extend(lgg_brains)
+    brains.extend(lgg_brains)
 
-    brains = tf.random.shuffle(hgg_brains)
-    train_brains, val_brains = train_test_split(brains, validation_size, random_state=42)
+    train_brains, val_brains = train_test_split(brains, test_size=validation_size, random_state=42, shuffle=True)
     
     test_brains = get_directory_paths(test_path)
 
@@ -48,17 +47,19 @@ def load_dataset_paths(train_path: str, test_path: str, validation_size: float =
 
 class DataGenerator(tf.keras.utils.Sequence):
 
-    def __init__(self, dataset_paths: tf.Tensor, batch_size: int = 32, brain_slices: int = 8, dtype = np.float32):
+    def __init__(self, dataset_paths: list[str], batch_size: int = 32, brain_slices: int = 8, X_dtype = np.float32, Y_dtype = np.int8):
         self.dataset_paths = dataset_paths
         self.brain_slices = brain_slices
         self.batch_size = batch_size
         self.sample_size = self.batch_size//self.brain_slices
         self.batches_per_brain = BRAIN_FRAMES//self.batch_size
-        rest = BRAIN_FRAMES - self.batches_per_brain * self.batch_size
-        self.offset = rest//2
-        self.slice_size = BRAIN_FRAMES//brain_slices
+        self.cutted_frames = self.batches_per_brain * self.batch_size
+        rest = BRAIN_FRAMES - self.cutted_frames
+        self.offset = rest//2 + 1
+        self.slice_size = self.cutted_frames//brain_slices
         self.cur_brain: Brain = None
-        self.dtype = dtype
+        self.X_dtype = X_dtype
+        self.Y_dtype = Y_dtype
 
     def __len__(self):
         return self.dataset_paths * self.batches_per_brain
@@ -68,34 +69,41 @@ class DataGenerator(tf.keras.utils.Sequence):
         step = idx % self.batches_per_brain
 
         if step == 0:
-            t1 = nib.load(os.path.join(self.dataset_paths[idx], '_t1.nii')).get_fdata(dtype=self.dtype)
-            t1ce = nib.load(os.path.join(self.dataset_paths[idx], '_t1ce.nii')).get_fdata(dtype=self.dtype)
-            t2 = nib.load(os.path.join(self.dataset_paths[idx], '_t2.nii')).get_fdata(dtype=self.dtype)
-            flair = nib.load(os.path.join(self.dataset_paths[idx], '_flair.nii')).get_fdata(dtype=self.dtype)
-            seg = nib.load(os.path.join(self.dataset_paths[idx], '_seg.nii')).get_fdata(dtype=self.dtype)
+            extended = self._extend_path_from_last_part(self.dataset_paths[idx])
+            t1 = nib.load(f'{extended}_t1.nii').get_fdata(dtype=self.X_dtype)
+            t1ce = nib.load(f'{extended}_t1ce.nii').get_fdata(dtype=self.X_dtype)
+            t2 = nib.load(f'{extended}_t2.nii').get_fdata(dtype=self.X_dtype)
+            flair = nib.load(f'{extended}_flair.nii').get_fdata(dtype=self.X_dtype)
+            seg = nib.load(f'{extended}_seg.nii').get_fdata(dtype=self.X_dtype)
 
             self.cur_brain = Brain(t1, t1ce, t2, flair, seg)
 
-        batch_X = np.zeros((self.batch_size, IMAGE_SIZE, IMAGE_SIZE, 4), dtype=self.dtype)
-        batch_Y = np.zeros((self.batch_size, IMAGE_SIZE, IMAGE_SIZE), dtype=self.dtype)
+        batch_X = np.zeros((self.batch_size, IMAGE_SIZE, IMAGE_SIZE, 4), dtype=self.X_dtype)
+        batch_Y = np.zeros((self.batch_size, IMAGE_SIZE, IMAGE_SIZE), dtype=self.Y_dtype)
 
+        batch_index = 0
+        ceil = BRAIN_FRAMES - self.offset
         for slice in range(self.brain_slices):
-            low = max(slice * self.slice_size - 1 + step * self.sample_size, 0)
-            t1_cut = self.cur_brain.t1[:, :, low + self.offset : low + self.sample_size - self.offset]
-            t1ce_cut = self.cur_brain.t1ce[:, :, low + self.offset : low + self.sample_size - self.offset]
-            t2_cut = self.cur_brain.t2[:, :, low + self.offset : low + self.sample_size - self.offset]
-            flair_cut = self.cur_brain.flair[:, :, low + self.offset : low + self.sample_size - self.offset]
-            seg_cut = self.cur_brain.seg[:, :, low + self.offset : low + self.sample_size - self.offset]
+            low = max(slice * self.slice_size + step * self.sample_size + self.offset - 1, 0)
+            high = min(low + self.sample_size, ceil)
+            t1_cut = self.cur_brain.t1[:, :, low : high]
+            t1ce_cut = self.cur_brain.t1ce[:, :, low : high]
+            t2_cut = self.cur_brain.t2[:, :, low : high]
+            flair_cut = self.cur_brain.flair[:, :, low : high]
+            seg_cut = self.cur_brain.seg[:, :, low : high]
 
-            for i in self.batch_size:
-                index = i % self.sample_size
-                batch_X[i, :, :, 0] = cv2.resize(t1_cut[:, :, index], (IMAGE_SIZE, IMAGE_SIZE))
-                batch_X[i, :, :, 1] = cv2.resize(t1ce_cut[:, :, index], (IMAGE_SIZE, IMAGE_SIZE))
-                batch_X[i, :, :, 2] = cv2.resize(t2_cut[:, :, index], (IMAGE_SIZE, IMAGE_SIZE))
-                batch_X[i, :, :, 3] = cv2.resize(flair_cut[:, :, index], (IMAGE_SIZE, IMAGE_SIZE))
-                batch_Y[i, :, :] = cv2.resize(seg_cut[:, :, index], (IMAGE_SIZE, IMAGE_SIZE))
+            for i in range(self.sample_size):
+                batch_X[batch_index, :, :, 0] = cv2.resize(t1_cut[:, :, i], (IMAGE_SIZE, IMAGE_SIZE))
+                batch_X[batch_index, :, :, 1] = cv2.resize(t1ce_cut[:, :, i], (IMAGE_SIZE, IMAGE_SIZE))
+                batch_X[batch_index, :, :, 2] = cv2.resize(t2_cut[:, :, i], (IMAGE_SIZE, IMAGE_SIZE))
+                batch_X[batch_index, :, :, 3] = cv2.resize(flair_cut[:, :, i], (IMAGE_SIZE, IMAGE_SIZE))
+                batch_Y[batch_index, :, :] = cv2.resize(seg_cut[:, :, i], (IMAGE_SIZE, IMAGE_SIZE))
+                batch_index += 1
 
         return batch_X/np.max(batch_X), batch_Y
     
     def on_epoch_end(self):
         self.dataset_paths = tf.random.shuffle(self.dataset_paths)
+
+    def _extend_path_from_last_part(self, path):
+        return os.path.join(path, os.path.basename(path))
