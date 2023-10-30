@@ -66,40 +66,43 @@ class FrameCutter:
         for path in paths:
             extended = extend_path_from_last_part(path)
             clip = nib.load(f'{extended}_t1.nii').get_fdata(dtype=X_DTYPE)[:, :, self.low:self.high]
-            start = IMAGE_SIZE//2
             for i in range(clip.shape[-1]):
                 resized = cv2.resize(clip[:, :, i], (IMAGE_SIZE, IMAGE_SIZE))
-                horizontal_strip = resized[start, :]
-                low_index, high_index = self._find_limit_values(horizontal_strip)
-                self.w_low_index = min(self.w_low_index, low_index)
-                self.w_high_index = max(self.w_high_index, high_index)
+                h_low_index, h_high_index, w_low_index, w_high_index = self._find_limit_values(resized)
 
-                vertical_strip = resized[:, start]
-                low_index, high_index = self._find_limit_values(vertical_strip)
-                self.h_low_index = min(self.h_low_index, low_index)
-                self.h_high_index = max(self.h_high_index, high_index)
+                self.h_low_index = min(self.h_low_index, h_low_index)
+                self.h_high_index = max(self.h_high_index, h_high_index)
+                if h_low_index == 20 or h_high_index == 106:
+                    print()
+
+                self.w_low_index = min(self.w_low_index, w_low_index)
+                self.w_high_index = max(self.w_high_index, w_high_index)
+                if w_low_index == 15 or w_high_index == 117:
+                    print()
+
 
     def transform(self, array: np.ndarray) -> np.ndarray:
         if self.w_low_index == IMAGE_SIZE - 1 and self.w_high_index == 0 and self.h_low_index == IMAGE_SIZE - 1 and self.h_high_index == 0:
             raise FrameCutter.NotFittedError()
         
         return array[self.h_low_index:self.h_high_index, self.w_low_index:self.w_high_index]
-    
-    def get_indexes(self) -> dict[str, int]:
-        return {'h_low_index': self.h_low_index, 'h_high_index': self.h_high_index, 'w_low_index': self.w_low_index, 'w_high_index': self.w_high_index}
 
-    def _find_limit_values(self, array: np.ndarray) -> tuple[int, int]:
-        low_index, high_index = 0, 0
-        is_brain = False
-        for index, elem in enumerate(array):
-            if elem and not is_brain:
-                low_index = index
-                is_brain = True
-            elif not elem and is_brain:
-                high_index = index
-                break
+    def _find_limit_values(self, array: np.ndarray) -> tuple[int, int, int, int]:
+        
+        def get_through_axis(array, mask, axis):
+            low_indexes = mask.argmax(axis=axis)
+            low_index = low_indexes[low_indexes.nonzero()].min()
+            high_indexes = np.flip(mask, axis=axis).argmax(axis=axis)
+            high_index = (array.shape[0] - high_indexes[high_indexes.nonzero()] - 1).max()
 
-        return low_index, high_index
+            return low_index, high_index
+
+        mask = array != 0
+        h_low_index, h_high_index = get_through_axis(array, mask, axis=0)
+        w_low_index, w_high_index = get_through_axis(array, mask, axis=1)
+
+        return h_low_index, h_high_index, w_low_index, w_high_index
+        
     
     class NotFittedError(Exception):
 
