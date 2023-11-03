@@ -72,13 +72,9 @@ class FrameCutter:
 
                 self.h_low_index = min(self.h_low_index, h_low_index)
                 self.h_high_index = max(self.h_high_index, h_high_index)
-                if h_low_index == 20 or h_high_index == 106:
-                    print()
 
                 self.w_low_index = min(self.w_low_index, w_low_index)
                 self.w_high_index = max(self.w_high_index, w_high_index)
-                if w_low_index == 15 or w_high_index == 117:
-                    print()
 
 
     def transform(self, array: np.ndarray) -> np.ndarray:
@@ -138,7 +134,7 @@ class DataGenerator(tf.keras.utils.Sequence):
         step = idx % self.batches_per_brain
 
         if step == 0:
-            path = self.dataset_paths[idx]
+            path = self.dataset_paths[idx // self.batches_per_brain]
             extended = extend_path_from_last_part(path if type(path) == str else path.decode('ASCII'))
             t1 = nib.load(f'{extended}_t1.nii').get_fdata(dtype=self.X_dtype)
             t1ce = nib.load(f'{extended}_t1ce.nii').get_fdata(dtype=self.X_dtype)
