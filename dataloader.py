@@ -34,20 +34,26 @@ class Brain:
 def get_directory_paths(directory_path: str):
     return [f.path for f in os.scandir(directory_path) if f.is_dir()]
 
-def load_dataset_paths(train_path: str, test_path: str, validation_size: float = 0.2) -> tuple[list[str], list[str], list[str]]:
-    hgg_path = os.path.join(train_path, 'HGG')
-    lgg_path = os.path.join(train_path, 'LGG')
+def load_dataset_paths(labeled_path: str, unlabeled_path: str, validation_size_from_train: float = 0.2, test_size: float = 0.15, random_state = 42) -> tuple[list[str], list[str], list[str], list[str]]:
+    hgg_path = os.path.join(labeled_path, 'HGG')
+    lgg_path = os.path.join(labeled_path, 'LGG')
 
-    brains = get_directory_paths(hgg_path)
+    hgg_brains = get_directory_paths(hgg_path)
+    hgg_train_val_brains, hgg_test_brains = train_test_split(hgg_brains, test_size=test_size, random_state=random_state)
     lgg_brains = get_directory_paths(lgg_path)
+    lgg_train_val_brains, lgg_test_brains = train_test_split(lgg_brains, test_size=test_size, random_state=random_state)
 
-    brains.extend(lgg_brains)
+    test_brains = hgg_test_brains + lgg_test_brains
 
-    train_brains, val_brains = train_test_split(brains, test_size=validation_size, random_state=42, shuffle=True)
+    hgg_train_brains, hgg_val_brains = train_test_split(hgg_train_val_brains, test_size=validation_size_from_train, random_state=random_state)
+    lgg_train_brains, lgg_val_brains = train_test_split(lgg_train_val_brains, test_size=validation_size_from_train, random_state=random_state)
+
+    train_brains = hgg_train_brains + lgg_train_brains
+    val_brains = hgg_val_brains + lgg_val_brains
     
-    test_brains = get_directory_paths(test_path)
+    unlabeled_brains = get_directory_paths(unlabeled_path)
 
-    return train_brains, val_brains, test_brains
+    return train_brains, val_brains, test_brains, unlabeled_brains
 
 def extend_path_from_last_part(path: str) -> str:
     return os.path.join(path, os.path.basename(path))
@@ -107,8 +113,8 @@ class FrameCutter:
 
 class DataGenerator(tf.keras.utils.Sequence):
 
-    def __init__(self, dataset_paths: list[str], h_low_index: int, h_high_index: int, w_low_index: int, w_high_index: int, batch_size: int = 32, brain_slices: int = 8, X_dtype = X_DTYPE, Y_dtype = Y_DTYPE):
-        self.dataset_paths = dataset_paths
+    def __init__(self, dataset_paths: list[str], h_low_index: int, h_high_index: int, w_low_index: int, w_high_index: int, max_value: int, batch_size: int = 32, brain_slices: int = 8, X_dtype = X_DTYPE, Y_dtype = Y_DTYPE):
+        self.dataset_paths = tf.random.shuffle(dataset_paths)
         self.brain_slices = brain_slices
         self.batch_size = batch_size
         self.sample_size = self.batch_size//self.brain_slices
@@ -124,6 +130,7 @@ class DataGenerator(tf.keras.utils.Sequence):
         self.h_high_index = h_high_index
         self.w_low_index = w_low_index
         self.w_high_index = w_high_index
+        self.max_value = max_value
         self.len = self.__len__()
 
     def __len__(self):
@@ -134,7 +141,7 @@ class DataGenerator(tf.keras.utils.Sequence):
         step = idx % self.batches_per_brain
 
         if step == 0:
-            path = self.dataset_paths[idx // self.batches_per_brain]
+            path = self.dataset_paths[idx // self.batches_per_brain].numpy()
             extended = extend_path_from_last_part(path if type(path) == str else path.decode('ASCII'))
             t1 = nib.load(f'{extended}_t1.nii').get_fdata(dtype=self.X_dtype)
             t1ce = nib.load(f'{extended}_t1ce.nii').get_fdata(dtype=self.X_dtype)
@@ -169,16 +176,27 @@ class DataGenerator(tf.keras.utils.Sequence):
                 batch_Y[batch_index, :, :] = self._cut_frame(cv2.resize(seg_cut[:, :, i], (IMAGE_SIZE, IMAGE_SIZE)))
                 batch_index += 1
 
-        return batch_X/np.max(batch_X), batch_Y
-    
-    def on_epoch_end(self):
-        self.dataset_paths = tf.random.shuffle(self.dataset_paths)
+        return batch_X/self.max_value, batch_Y
 
     def _cut_frame(self, array: np.ndarray) -> np.ndarray:
         return array[self.h_low_index:self.h_high_index, self.w_low_index:self.w_high_index]
 
-def build_data_generator(dataset_paths: list[str], h_low_index: int, h_high_index: int, w_low_index: int, w_high_index: int, batch_size: int = 32, brain_slices: int = 8, X_dtype = X_DTYPE, Y_dtype = Y_DTYPE) -> Iterator[tuple[np.ndarray, np.ndarray]]:
-    generator = DataGenerator(dataset_paths, h_low_index, h_high_index, w_low_index, w_high_index, batch_size, brain_slices, X_dtype, Y_dtype)
+def build_data_generator(dataset_paths: list[str], h_low_index: int, h_high_index: int, w_low_index: int, w_high_index: int, max_value: int, batch_size: int = 32, brain_slices: int = 8, X_dtype = X_DTYPE, Y_dtype = Y_DTYPE) -> Iterator[tuple[np.ndarray, np.ndarray]]:
+    generator = DataGenerator(dataset_paths, h_low_index, h_high_index, w_low_index, w_high_index, max_value, batch_size, brain_slices, X_dtype, Y_dtype)
 
     for i in range(generator.len):
         yield generator.__getitem__(i)
+
+def find_max_per_channel(paths: list[str]) -> dict[str, float]:
+
+    t1_max, t1ce_max, t2_max, flair_max = 0, 0, 0, 0
+
+    for path in paths:
+        extended = extend_path_from_last_part(path)
+        t1_max = max(t1_max, np.max(nib.load(f'{extended}_t1.nii').get_fdata()))
+        t1ce_max = max(t1ce_max, np.max(nib.load(f'{extended}_t1ce.nii').get_fdata()))
+        t2_max = max(t2_max, np.max(nib.load(f'{extended}_t2.nii').get_fdata()))
+        flair_max = max(flair_max, np.max(nib.load(f'{extended}_flair.nii').get_fdata()))
+
+    return {'t1': t1_max, 't1ce': t1ce_max, 't2': t2_max, 'flair': flair_max}
+
