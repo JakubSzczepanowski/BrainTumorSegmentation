@@ -113,7 +113,7 @@ class FrameCutter:
 
 class DataGenerator(tf.keras.utils.Sequence):
 
-    def __init__(self, dataset_paths: list[str], h_low_index: int, h_high_index: int, w_low_index: int, w_high_index: int, max_value: int, batch_size: int = 32, brain_slices: int = 8, X_dtype = X_DTYPE, Y_dtype = Y_DTYPE):
+    def __init__(self, dataset_paths: list[str], max_value: int, batch_size: int = 32, brain_slices: int = 8, X_dtype = X_DTYPE, Y_dtype = Y_DTYPE):
         self.dataset_paths = tf.random.shuffle(dataset_paths)
         self.brain_slices = brain_slices
         self.batch_size = batch_size
@@ -126,10 +126,6 @@ class DataGenerator(tf.keras.utils.Sequence):
         self.cur_brain: Brain = None
         self.X_dtype = X_dtype
         self.Y_dtype = Y_dtype
-        self.h_low_index = h_low_index
-        self.h_high_index = h_high_index
-        self.w_low_index = w_low_index
-        self.w_high_index = w_high_index
         self.max_value = max_value
         self.len = self.__len__()
 
@@ -151,10 +147,8 @@ class DataGenerator(tf.keras.utils.Sequence):
 
             self.cur_brain = Brain(t1, t1ce, t2, flair, seg)
 
-        new_height = self.h_high_index - self.h_low_index
-        new_width = self.w_high_index - self.w_low_index
-        batch_X = np.zeros((self.batch_size, new_height, new_width, CHANNELS), dtype=self.X_dtype)
-        batch_Y = np.zeros((self.batch_size, new_height, new_width), dtype=self.Y_dtype)
+        batch_X = np.zeros((self.batch_size, IMAGE_SIZE, IMAGE_SIZE, CHANNELS), dtype=self.X_dtype)
+        batch_Y = np.zeros((self.batch_size, IMAGE_SIZE, IMAGE_SIZE), dtype=self.Y_dtype)
 
         batch_index = 0
         ceil = BRAIN_FRAMES - self.offset
@@ -171,18 +165,15 @@ class DataGenerator(tf.keras.utils.Sequence):
             for i in range(self.sample_size):
 
                 for channel in range(CHANNELS):
-                    batch_X[batch_index, :, :, channel] = self._cut_frame(cv2.resize(X_cuts[channel][:, :, i], (IMAGE_SIZE, IMAGE_SIZE)))
+                    batch_X[batch_index, :, :, channel] = cv2.resize(X_cuts[channel][:, :, i], (IMAGE_SIZE, IMAGE_SIZE))
                 
-                batch_Y[batch_index, :, :] = self._cut_frame(cv2.resize(seg_cut[:, :, i], (IMAGE_SIZE, IMAGE_SIZE)))
+                batch_Y[batch_index, :, :] = cv2.resize(seg_cut[:, :, i], (IMAGE_SIZE, IMAGE_SIZE))
                 batch_index += 1
 
         return batch_X/self.max_value, batch_Y
 
-    def _cut_frame(self, array: np.ndarray) -> np.ndarray:
-        return array[self.h_low_index:self.h_high_index, self.w_low_index:self.w_high_index]
-
-def build_data_generator(dataset_paths: list[str], h_low_index: int, h_high_index: int, w_low_index: int, w_high_index: int, max_value: int, batch_size: int = 32, brain_slices: int = 8, X_dtype = X_DTYPE, Y_dtype = Y_DTYPE) -> Iterator[tuple[np.ndarray, np.ndarray]]:
-    generator = DataGenerator(dataset_paths, h_low_index, h_high_index, w_low_index, w_high_index, max_value, batch_size, brain_slices, X_dtype, Y_dtype)
+def build_data_generator(dataset_paths: list[str], max_value: int, batch_size: int = 32, brain_slices: int = 8, X_dtype = X_DTYPE, Y_dtype = Y_DTYPE) -> Iterator[tuple[np.ndarray, np.ndarray]]:
+    generator = DataGenerator(dataset_paths, max_value, batch_size, brain_slices, X_dtype, Y_dtype)
 
     for i in range(generator.len):
         yield generator.__getitem__(i)

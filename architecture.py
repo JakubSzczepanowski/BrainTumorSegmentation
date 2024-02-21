@@ -55,7 +55,7 @@ def build_reduction_sequential(filters: int, dropout: float, activation: str, ke
 
     return seq, inception
 
-def build_exspansion_sequential(filters: int, dropout: float, activation: str, kernel_initializer: str, prev_node: tf.keras.layers.Layer, concat_with: tf.keras.Sequential) -> tf.keras.Sequential:
+def build_expansion_sequential(filters: int, dropout: float, activation: str, kernel_initializer: str, prev_node: tf.keras.layers.Layer, concat_with: tf.keras.Sequential) -> tf.keras.Sequential:
 
     e = tf.keras.layers.Conv2DTranspose(filters, 2, 2, 'same', activation=activation, kernel_initializer=kernel_initializer)(prev_node)
     e = tf.keras.layers.Concatenate()([e, concat_with])
@@ -80,13 +80,13 @@ def build_model(input_shape: tuple[int, int, int], num_classes: int, activation:
 
     r5 = build_conv_cascade(256, 0.3, activation, kernel_initializer)(i3)
 
-    e = build_exspansion_sequential(128, 0.2, activation, kernel_initializer, r5, r4)
+    e = build_expansion_sequential(128, 0.2, activation, kernel_initializer, r5, r4)
 
-    e = build_exspansion_sequential(64, 0.2, activation, kernel_initializer, e, r3)
+    e = build_expansion_sequential(64, 0.2, activation, kernel_initializer, e, r3)
 
-    e = build_exspansion_sequential(32, 0.2, activation, kernel_initializer, e, r2)
+    e = build_expansion_sequential(32, 0.2, activation, kernel_initializer, e, r2)
 
-    e = build_exspansion_sequential(16, 0.1, activation, kernel_initializer, e, r1)
+    e = build_expansion_sequential(16, 0.1, activation, kernel_initializer, e, r1)
 
     output = tf.keras.layers.Conv2D(num_classes, 1, 1, 'same', activation='softmax')(e)
 
