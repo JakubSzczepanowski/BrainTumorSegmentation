@@ -7,7 +7,7 @@ import numpy as np
 import tensorflow as tf
 import cv2
 from sklearn.model_selection import train_test_split
-from functools import cache
+from functools import lru_cache
 
 # folder treningowy zawiera HGG i LGG. Należy stworzyć generator łączący oba zbiory w jeden potasowany w losowej kolejności. Każdy element to oddzielny mózg. Każdy mózg to (240, 240, 155)
 # jedna próbka będzie jednym przekrojem w kilku kanałach, a więc będzie tensorem o wymiarach (240, 240, channels). Takich próbek będzie tyle ile we wsadzie
@@ -135,7 +135,7 @@ class DataGenerator(tf.keras.utils.Sequence):
             self.hgg_size = hgg_size
             self.lgg_size = lgg_size
 
-    @cache
+    @lru_cache(maxsize=32)
     def _load_brain(self, idx) -> Brain:
         path = self.dataset_paths[idx]
         t1 = nib.load(f'{path}_t1.nii')
@@ -154,7 +154,7 @@ class DataGenerator(tf.keras.utils.Sequence):
         return len(self.dataset_paths) * self.batches_per_brain
 
     def __getitem__(self, idx):
-
+        print(idx)
         if self.bootstrap:
 
             batch_X = np.zeros((self.batch_size, IMAGE_SIZE, IMAGE_SIZE, CHANNELS), dtype=self.X_dtype)
@@ -171,11 +171,11 @@ class DataGenerator(tf.keras.utils.Sequence):
                     brain_scan = self._load_brain(brain_scan_index)
                     sample_index = np.random.randint(low, high)
 
-                    batch_X[batch_index, :, :, 0] = cv2.resize(brain_scan.t1.get_fdata(dtype=X_DTYPE)[:, :, sample_index], (IMAGE_SIZE, IMAGE_SIZE))
-                    batch_X[batch_index, :, :, 1] = cv2.resize(brain_scan.t1ce.get_fdata(dtype=X_DTYPE)[:, :, sample_index], (IMAGE_SIZE, IMAGE_SIZE))
-                    batch_X[batch_index, :, :, 2] = cv2.resize(brain_scan.t2.get_fdata(dtype=X_DTYPE)[:, :, sample_index], (IMAGE_SIZE, IMAGE_SIZE))
-                    batch_X[batch_index, :, :, 3] = cv2.resize(brain_scan.flair.get_fdata(dtype=X_DTYPE)[:, :, sample_index], (IMAGE_SIZE, IMAGE_SIZE))
-                    y_map = self._map_labels(brain_scan.seg.get_fdata(dtype=X_DTYPE)[:, :, sample_index])
+                    batch_X[batch_index, :, :, 0] = cv2.resize(brain_scan.t1.get_fdata(dtype=self.X_dtype)[:, :, sample_index], (IMAGE_SIZE, IMAGE_SIZE))
+                    batch_X[batch_index, :, :, 1] = cv2.resize(brain_scan.t1ce.get_fdata(dtype=self.X_dtype)[:, :, sample_index], (IMAGE_SIZE, IMAGE_SIZE))
+                    batch_X[batch_index, :, :, 2] = cv2.resize(brain_scan.t2.get_fdata(dtype=self.X_dtype)[:, :, sample_index], (IMAGE_SIZE, IMAGE_SIZE))
+                    batch_X[batch_index, :, :, 3] = cv2.resize(brain_scan.flair.get_fdata(dtype=self.X_dtype)[:, :, sample_index], (IMAGE_SIZE, IMAGE_SIZE))
+                    y_map = self._map_labels(brain_scan.seg.get_fdata(dtype=self.X_dtype)[:, :, sample_index])
                     
                     batch_Y[batch_index, :, :] = cv2.resize(y_map, (IMAGE_SIZE, IMAGE_SIZE))
 
@@ -225,9 +225,10 @@ class DataGenerator(tf.keras.utils.Sequence):
         return self
     
     def __exit__(self, exc_type, exc_val, exc_tb):
+        print(self._load_brain.cache_info())
         self._load_brain.cache_clear()
 
-def build_data_generator(dataset_paths: list[str], max_value: int, hgg_size: int, lgg_size: int, batch_size: int = 32, brain_slices: int = 8, X_dtype = X_DTYPE, Y_dtype = Y_DTYPE, bootstrap: bool = True) -> Iterator[tuple[np.ndarray, np.ndarray]]:
+def build_data_generator(dataset_paths: list[str], max_value: int, hgg_size: int, lgg_size: int, batch_size: int = 32, brain_slices: int = 8, X_dtype = X_DTYPE, Y_dtype = Y_DTYPE, bootstrap: bool = True) -> Iterator[tuple[np.ndarray, tf.Tensor]]:
     with DataGenerator(dataset_paths, max_value, batch_size, brain_slices, X_dtype, Y_dtype, bootstrap, hgg_size, lgg_size) as generator:
 
         for i in range(generator.len):
