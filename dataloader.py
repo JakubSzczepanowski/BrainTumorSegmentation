@@ -7,6 +7,7 @@ import numpy as np
 import tensorflow as tf
 import cv2
 from sklearn.model_selection import train_test_split
+from functools import cache
 
 # folder treningowy zawiera HGG i LGG. Należy stworzyć generator łączący oba zbiory w jeden potasowany w losowej kolejności. Każdy element to oddzielny mózg. Każdy mózg to (240, 240, 155)
 # jedna próbka będzie jednym przekrojem w kilku kanałach, a więc będzie tensorem o wymiarach (240, 240, channels). Takich próbek będzie tyle ile we wsadzie
@@ -21,20 +22,21 @@ BRAIN_FRAMES = 155
 IMAGE_SIZE = 128
 CHANNELS = 4
 X_DTYPE = np.float32
-Y_DTYPE = np.int8
+Y_DTYPE = np.uint8
+LABEL_MAPPING_PATTERN = {0: 0, 2: 1, 4: 2, 1: 3}
 
 @dataclass
 class Brain:
-    t1: np.memmap
-    t1ce: np.memmap
-    t2: np.memmap
-    flair: np.memmap
-    seg: np.memmap
+    t1: nib.Nifti1Image
+    t1ce: nib.Nifti1Image
+    t2: nib.Nifti1Image
+    flair: nib.Nifti1Image
+    seg: nib.Nifti1Image
 
 def get_directory_paths(directory_path: str):
     return [f.path for f in os.scandir(directory_path) if f.is_dir()]
 
-def load_dataset_paths(labeled_path: str, unlabeled_path: str, validation_size_from_train: float = 0.2, test_size: float = 0.15, random_state = 42) -> tuple[list[str], list[str], list[str], list[str]]:
+def load_dataset_paths(labeled_path: str, unlabeled_path: str, validation_size_from_train: float = 0.2, test_size: float = 0.15, random_state = 42):
     hgg_path = os.path.join(labeled_path, 'HGG')
     lgg_path = os.path.join(labeled_path, 'LGG')
 
@@ -53,7 +55,7 @@ def load_dataset_paths(labeled_path: str, unlabeled_path: str, validation_size_f
     
     unlabeled_brains = get_directory_paths(unlabeled_path)
 
-    return train_brains, val_brains, test_brains, unlabeled_brains
+    return (train_brains, val_brains, test_brains, unlabeled_brains), (len(hgg_train_brains), len(lgg_train_brains), len(hgg_val_brains), len(lgg_val_brains))
 
 def extend_path_from_last_part(path: str) -> str:
     return os.path.join(path, os.path.basename(path))
@@ -113,8 +115,8 @@ class FrameCutter:
 
 class DataGenerator(tf.keras.utils.Sequence):
 
-    def __init__(self, dataset_paths: list[str], max_value: int, batch_size: int = 32, brain_slices: int = 8, X_dtype = X_DTYPE, Y_dtype = Y_DTYPE):
-        self.dataset_paths = tf.random.shuffle(dataset_paths)
+    def __init__(self, dataset_paths: list[str], max_value: int, batch_size: int = 32, brain_slices: int = 8, X_dtype = X_DTYPE, Y_dtype = Y_DTYPE, bootstrap: bool = True, hgg_size: int = None, lgg_size: int = None):
+        self.dataset_paths = [extend_path_from_last_part(path).decode('ASCII') for path in dataset_paths]
         self.brain_slices = brain_slices
         self.batch_size = batch_size
         self.sample_size = self.batch_size//self.brain_slices
@@ -128,22 +130,69 @@ class DataGenerator(tf.keras.utils.Sequence):
         self.Y_dtype = Y_dtype
         self.max_value = max_value
         self.len = self.__len__()
+        self.bootstrap = bootstrap
+        if bootstrap:
+            self.hgg_size = hgg_size
+            self.lgg_size = lgg_size
+
+    @cache
+    def _load_brain(self, idx) -> Brain:
+        path = self.dataset_paths[idx]
+        t1 = nib.load(f'{path}_t1.nii')
+        t1ce = nib.load(f'{path}_t1ce.nii')
+        t2 = nib.load(f'{path}_t2.nii')
+        flair = nib.load(f'{path}_flair.nii')
+        seg = nib.load(f'{path}_seg.nii')
+
+        return Brain(t1, t1ce, t2, flair, seg)
+    
+    def _map_labels(self, arr):
+        u, inv = np.unique(arr, return_inverse=True)
+        return np.array([LABEL_MAPPING_PATTERN[x] for x in u], dtype=self.Y_dtype)[inv].reshape(arr.shape)
 
     def __len__(self):
         return len(self.dataset_paths) * self.batches_per_brain
 
     def __getitem__(self, idx):
 
+        if self.bootstrap:
+
+            batch_X = np.zeros((self.batch_size, IMAGE_SIZE, IMAGE_SIZE, CHANNELS), dtype=self.X_dtype)
+            batch_Y = np.zeros((self.batch_size, IMAGE_SIZE, IMAGE_SIZE), dtype=self.Y_dtype)
+
+            ceil = BRAIN_FRAMES - self.offset
+            batch_index = 0
+            for slice in range(self.brain_slices):
+                low = max(slice * self.slice_size + self.offset - 1, 0)
+                high = min(low + self.slice_size + 1, ceil)
+
+                for sample in range(self.sample_size):
+                    brain_scan_index = np.random.randint(self.hgg_size) if sample < self.sample_size//2 else np.random.randint(self.hgg_size, self.hgg_size + self.lgg_size)
+                    brain_scan = self._load_brain(brain_scan_index)
+                    sample_index = np.random.randint(low, high)
+
+                    batch_X[batch_index, :, :, 0] = cv2.resize(brain_scan.t1.get_fdata(dtype=X_DTYPE)[:, :, sample_index], (IMAGE_SIZE, IMAGE_SIZE))
+                    batch_X[batch_index, :, :, 1] = cv2.resize(brain_scan.t1ce.get_fdata(dtype=X_DTYPE)[:, :, sample_index], (IMAGE_SIZE, IMAGE_SIZE))
+                    batch_X[batch_index, :, :, 2] = cv2.resize(brain_scan.t2.get_fdata(dtype=X_DTYPE)[:, :, sample_index], (IMAGE_SIZE, IMAGE_SIZE))
+                    batch_X[batch_index, :, :, 3] = cv2.resize(brain_scan.flair.get_fdata(dtype=X_DTYPE)[:, :, sample_index], (IMAGE_SIZE, IMAGE_SIZE))
+                    y_map = self._map_labels(brain_scan.seg.get_fdata(dtype=X_DTYPE)[:, :, sample_index])
+                    
+                    batch_Y[batch_index, :, :] = cv2.resize(y_map, (IMAGE_SIZE, IMAGE_SIZE))
+
+                    batch_index += 1
+
+            return batch_X/self.max_value, tf.one_hot(batch_Y, 4, dtype=self.Y_dtype)
+
         step = idx % self.batches_per_brain
 
         if step == 0:
-            path = self.dataset_paths[idx // self.batches_per_brain].numpy()
-            extended = extend_path_from_last_part(path if type(path) == str else path.decode('ASCII'))
+            extended = extend_path_from_last_part(self.dataset_paths[idx // self.batches_per_brain])
             t1 = nib.load(f'{extended}_t1.nii').get_fdata(dtype=self.X_dtype)
             t1ce = nib.load(f'{extended}_t1ce.nii').get_fdata(dtype=self.X_dtype)
             t2 = nib.load(f'{extended}_t2.nii').get_fdata(dtype=self.X_dtype)
             flair = nib.load(f'{extended}_flair.nii').get_fdata(dtype=self.X_dtype)
             seg = nib.load(f'{extended}_seg.nii').get_fdata(dtype=self.X_dtype)
+
 
             self.cur_brain = Brain(t1, t1ce, t2, flair, seg)
 
@@ -170,13 +219,19 @@ class DataGenerator(tf.keras.utils.Sequence):
                 batch_Y[batch_index, :, :] = cv2.resize(seg_cut[:, :, i], (IMAGE_SIZE, IMAGE_SIZE))
                 batch_index += 1
 
-        return batch_X/self.max_value, batch_Y
+        return batch_X/self.max_value, tf.one_hot(batch_Y)
+    
+    def __enter__(self):
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self._load_brain.cache_clear()
 
-def build_data_generator(dataset_paths: list[str], max_value: int, batch_size: int = 32, brain_slices: int = 8, X_dtype = X_DTYPE, Y_dtype = Y_DTYPE) -> Iterator[tuple[np.ndarray, np.ndarray]]:
-    generator = DataGenerator(dataset_paths, max_value, batch_size, brain_slices, X_dtype, Y_dtype)
+def build_data_generator(dataset_paths: list[str], max_value: int, hgg_size: int, lgg_size: int, batch_size: int = 32, brain_slices: int = 8, X_dtype = X_DTYPE, Y_dtype = Y_DTYPE, bootstrap: bool = True) -> Iterator[tuple[np.ndarray, np.ndarray]]:
+    with DataGenerator(dataset_paths, max_value, batch_size, brain_slices, X_dtype, Y_dtype, bootstrap, hgg_size, lgg_size) as generator:
 
-    for i in range(generator.len):
-        yield generator.__getitem__(i)
+        for i in range(generator.len):
+            yield generator.__getitem__(i)
 
 def find_max_per_channel(paths: list[str]) -> dict[str, float]:
 
