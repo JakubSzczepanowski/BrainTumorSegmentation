@@ -167,9 +167,9 @@ class DataGenerator(tf.keras.utils.Sequence):
                 high = min(low + self.slice_size + 1, ceil)
 
                 for sample in range(self.sample_size):
-                    brain_scan_index = np.random.randint(self.hgg_size) if sample < self.sample_size//2 else np.random.randint(self.hgg_size, self.hgg_size + self.lgg_size)
+                    brain_scan_index = tf.random.uniform(shape=(), maxval=self.hgg_size, dtype=tf.int32).numpy() if sample < self.sample_size//2 else tf.random.uniform(shape=(), minval=self.hgg_size, maxval=(self.hgg_size + self.lgg_size), dtype=tf.int32).numpy()
                     brain_scan = self._load_brain(brain_scan_index)
-                    sample_index = np.random.randint(low, high)
+                    sample_index = tf.random.uniform(shape=(), minval=low, maxval=high, dtype=tf.int32).numpy()
 
                     batch_X[batch_index, :, :, 0] = cv2.resize(brain_scan.t1.get_fdata(dtype=self.X_dtype)[:, :, sample_index], (IMAGE_SIZE, IMAGE_SIZE))
                     batch_X[batch_index, :, :, 1] = cv2.resize(brain_scan.t1ce.get_fdata(dtype=self.X_dtype)[:, :, sample_index], (IMAGE_SIZE, IMAGE_SIZE))
