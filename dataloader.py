@@ -22,7 +22,7 @@ BRAIN_FRAMES = 155
 IMAGE_SIZE = 128
 CHANNELS = 4
 X_DTYPE = np.float32
-Y_DTYPE = np.uint8
+Y_DTYPE = np.float32
 LABEL_MAPPING_PATTERN = {0: 0, 2: 1, 4: 2, 1: 3}
 
 @dataclass
@@ -115,7 +115,7 @@ class FrameCutter:
 
 class DataGenerator(tf.keras.utils.Sequence):
 
-    def __init__(self, dataset_paths: list[str], max_value: int, batch_size: int = 32, brain_slices: int = 8, X_dtype = X_DTYPE, Y_dtype = Y_DTYPE, bootstrap: bool = True, hgg_size: int = None, lgg_size: int = None):
+    def __init__(self, dataset_paths: list[str], max_value: int, hgg_size: int, lgg_size: int, batch_size: int = 32, brain_slices: int = 8, X_dtype = X_DTYPE, Y_dtype = Y_DTYPE, bootstrap: bool = True):
         self.dataset_paths = [extend_path_from_last_part(path).decode('ASCII') for path in dataset_paths]
         self.brain_slices = brain_slices
         self.batch_size = batch_size
@@ -154,7 +154,6 @@ class DataGenerator(tf.keras.utils.Sequence):
         return len(self.dataset_paths) * self.batches_per_brain
 
     def __getitem__(self, idx):
-        print(idx)
         if self.bootstrap:
 
             batch_X = np.zeros((self.batch_size, IMAGE_SIZE, IMAGE_SIZE, CHANNELS), dtype=self.X_dtype)
@@ -225,11 +224,10 @@ class DataGenerator(tf.keras.utils.Sequence):
         return self
     
     def __exit__(self, exc_type, exc_val, exc_tb):
-        print(self._load_brain.cache_info())
         self._load_brain.cache_clear()
 
 def build_data_generator(dataset_paths: list[str], max_value: int, hgg_size: int, lgg_size: int, batch_size: int = 32, brain_slices: int = 8, X_dtype = X_DTYPE, Y_dtype = Y_DTYPE, bootstrap: bool = True) -> Iterator[tuple[np.ndarray, tf.Tensor]]:
-    with DataGenerator(dataset_paths, max_value, batch_size, brain_slices, X_dtype, Y_dtype, bootstrap, hgg_size, lgg_size) as generator:
+    with DataGenerator(dataset_paths, max_value, hgg_size, lgg_size, batch_size, brain_slices, X_dtype, Y_dtype, bootstrap) as generator:
 
         for i in range(generator.len):
             yield generator.__getitem__(i)
