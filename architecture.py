@@ -79,6 +79,8 @@ class DepthwiseConv2D(tf.keras.layers.Layer):
             trainable=True
         )
 
+        self.bias = self.add_weight('bias', shape=(self.filters,), initializer='zeros', trainable=True)
+
         self.norms = [tf.keras.layers.BatchNormalization() for activation in self.activations if hasattr(activation, '__name__') and activation.__name__ in ('tanh', 'sigmoid')]
         
         super().build(input_shape)
@@ -91,6 +93,8 @@ class DepthwiseConv2D(tf.keras.layers.Layer):
                 strides=self.strides,
                 padding=self.padding
             )
+        
+        x = tf.nn.bias_add(x, self.bias)
         
         kernel_range = self.channels // len(self.activations)
 
@@ -137,6 +141,8 @@ class SeparableConv2D(tf.keras.layers.Layer):
             shape=(self.kernel_size, self.kernel_size, self.channels, depth_multiplier),
             trainable=True
         )
+
+        self.bias = self.add_weight('bias', shape=(self.filters,), initializer='zeros', trainable=True)
         
         self.pointwise_kernel = self.add_weight(
             name='pointwise_kernel',
@@ -157,6 +163,8 @@ class SeparableConv2D(tf.keras.layers.Layer):
                 strides=self.strides,
                 padding=self.padding
             )
+        
+        x = tf.nn.bias_add(x, self.bias)
         
         kernel_range = self.channels // len(self.activations)
 
