@@ -8,6 +8,7 @@ import tensorflow as tf
 import cv2
 from sklearn.model_selection import train_test_split
 from functools import lru_cache
+import imgaug.augmenters as iaa
 
 BRAIN_FRAMES = 155
 IMAGE_SIZE = 128
@@ -110,14 +111,15 @@ class DataGenerator(tf.keras.utils.Sequence):
                 for _ in range(self.sample_size):
                     
                     sample_index = tf.random.uniform(shape=(), minval=low, maxval=high, dtype=tf.int32).numpy()
+                    aug = iaa.Affine(scale=(0.5, 1.5), rotate=(-180, 180)).to_deterministic()
 
-                    batch_X[batch_index, :, :, 0] = cv2.resize(brain_scan.t1.get_fdata(dtype=X_DTYPE)[:, :, sample_index], (IMAGE_SIZE, IMAGE_SIZE))
-                    batch_X[batch_index, :, :, 1] = cv2.resize(brain_scan.t1ce.get_fdata(dtype=X_DTYPE)[:, :, sample_index], (IMAGE_SIZE, IMAGE_SIZE))
-                    batch_X[batch_index, :, :, 2] = cv2.resize(brain_scan.t2.get_fdata(dtype=X_DTYPE)[:, :, sample_index], (IMAGE_SIZE, IMAGE_SIZE))
-                    batch_X[batch_index, :, :, 3] = cv2.resize(brain_scan.flair.get_fdata(dtype=X_DTYPE)[:, :, sample_index], (IMAGE_SIZE, IMAGE_SIZE))
+                    batch_X[batch_index, :, :, 0] = aug.augment_image(cv2.resize(brain_scan.t1.get_fdata(dtype=X_DTYPE)[:, :, sample_index], (IMAGE_SIZE, IMAGE_SIZE)))
+                    batch_X[batch_index, :, :, 1] = aug.augment_image(cv2.resize(brain_scan.t1ce.get_fdata(dtype=X_DTYPE)[:, :, sample_index], (IMAGE_SIZE, IMAGE_SIZE)))
+                    batch_X[batch_index, :, :, 2] = aug.augment_image(cv2.resize(brain_scan.t2.get_fdata(dtype=X_DTYPE)[:, :, sample_index], (IMAGE_SIZE, IMAGE_SIZE)))
+                    batch_X[batch_index, :, :, 3] = aug.augment_image(cv2.resize(brain_scan.flair.get_fdata(dtype=X_DTYPE)[:, :, sample_index], (IMAGE_SIZE, IMAGE_SIZE)))
                     y_map = self._map_labels(brain_scan.seg.get_fdata(dtype=X_DTYPE)[:, :, sample_index])
                     
-                    batch_Y[batch_index, :, :] = cv2.resize(y_map, (IMAGE_SIZE, IMAGE_SIZE))
+                    batch_Y[batch_index, :, :] = aug.augment_image(cv2.resize(y_map, (IMAGE_SIZE, IMAGE_SIZE)))
 
                     batch_index += 1
 
