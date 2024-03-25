@@ -60,7 +60,7 @@ def weighted_f1(y_true, y_pred):
 #     return tf.keras.losses.CategoricalCrossentropy()(tf.reshape(y_true, [-1]), tf.reshape(y_pred, [-1]), tf.reshape(class_weights, (1, 4)))
 
 weights = np.array([0.00109971, 0.1458139, 0.5603247, 0.29276177]).reshape((1,1,1,4))
-kWeights = K.constant(weights)
+# kWeights = K.constant(weights)
 class_weights = tf.constant([0.00109971, 0.1458139, 0.5603247, 0.29276177], dtype=tf.float32)
 
 def weighted_f1_loss(y_true, y_pred):
@@ -85,11 +85,11 @@ def weighted_f1_loss(y_true, y_pred):
 
     return 1 - average_f1
 
-def weighted_categorical_crossentropy(y_true, y_pred):
-    yWeights = kWeights * y_pred         #shape (batch, 128, 128, 4)
-    yWeights = K.sum(yWeights, axis=-1)  #shape (batch, 128, 128)  
+# def weighted_categorical_crossentropy(y_true, y_pred):
+#     yWeights = kWeights * y_pred         #shape (batch, 128, 128, 4)
+#     yWeights = K.sum(yWeights, axis=-1)  #shape (batch, 128, 128)  
 
-    loss = K.categorical_crossentropy(y_true, y_pred) #shape (batch, 128, 128)
-    wLoss = yWeights * loss
+#     loss = K.categorical_crossentropy(y_true, y_pred) #shape (batch, 128, 128)
+#     wLoss = yWeights * loss
 
-    return K.sum(wLoss, axis=(1,2))
+#     return K.sum(wLoss, axis=(1,2))
