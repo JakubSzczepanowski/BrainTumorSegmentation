@@ -3,15 +3,16 @@ import keras_cv
     
 def build_conv_cascade(filters: int, drop_proba: float, drop_size: int) -> tf.keras.Sequential:
 
-    activation = 'relu'
     kernel_initializer = 'he_normal'
 
     return tf.keras.Sequential([
-        tf.keras.layers.Conv2D(filters, 3, activation=activation, kernel_initializer=kernel_initializer, padding='same'),
+        tf.keras.layers.Conv2D(filters, 3, kernel_initializer=kernel_initializer, padding='same'),
         tf.keras.layers.BatchNormalization(),
+        tf.keras.layers.ReLU(),
         keras_cv.layers.DropBlock2D(drop_proba, drop_size),
-        tf.keras.layers.Conv2D(filters, 3, activation=activation, kernel_initializer=kernel_initializer, padding='same'),
-        tf.keras.layers.BatchNormalization()
+        tf.keras.layers.Conv2D(filters, 3, kernel_initializer=kernel_initializer, padding='same'),
+        tf.keras.layers.BatchNormalization(),
+        tf.keras.layers.ReLU()
     ])
     
 def build_reduction_sequential(filters: int, drop_proba: float, drop_size: int, prev_node: tf.keras.layers.Layer):
@@ -23,19 +24,21 @@ def build_reduction_sequential(filters: int, drop_proba: float, drop_size: int, 
 
 def build_expansion_sequential(filters: int, drop_proba: float, drop_size: int, prev_node: tf.keras.layers.Layer, concat_with: tf.keras.Sequential) -> tf.keras.Sequential:
 
-    activation = 'relu'
     kernel_initializer = 'he_normal'
 
-    e = tf.keras.layers.Conv2DTranspose(filters, 2, 2, 'same', activation=activation, kernel_initializer=kernel_initializer)(prev_node)
-    tf.keras.layers.BatchNormalization(),
+    e = tf.keras.layers.Conv2DTranspose(filters, 2, 2, 'same', kernel_initializer=kernel_initializer)(prev_node)
+    e = tf.keras.layers.BatchNormalization()(e)
+    e = tf.keras.layers.ReLU()(e)
     e = tf.keras.layers.Concatenate()([e, concat_with])
 
     return tf.keras.Sequential([
-        tf.keras.layers.Conv2D(filters, 3, 1, 'same', activation=activation, kernel_initializer=kernel_initializer),
+        tf.keras.layers.Conv2D(filters, 3, 1, 'same', kernel_initializer=kernel_initializer),
         tf.keras.layers.BatchNormalization(),
+        tf.keras.layers.ReLU(),
         keras_cv.layers.DropBlock2D(drop_proba, drop_size),
-        tf.keras.layers.Conv2D(filters, 3, 1, 'same', activation=activation, kernel_initializer=kernel_initializer),
-        tf.keras.layers.BatchNormalization()
+        tf.keras.layers.Conv2D(filters, 3, 1, 'same', kernel_initializer=kernel_initializer),
+        tf.keras.layers.BatchNormalization(),
+        tf.keras.layers.ReLU()
     ])(e)
 
 def build_model(input_shape: tuple[int, int, int], num_classes: int) -> tf.keras.Model:
