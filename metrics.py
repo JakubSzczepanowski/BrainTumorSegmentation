@@ -93,7 +93,7 @@ class WeightedF1(tf.keras.losses.Loss):
 
 def weighted_f1_loss(y_true, y_pred):
 
-    num_classes = tf.shape(y_true)[-1]
+    num_classes = y_true.get_shape().as_list()[-1]
 
     f1_scores = []
 
