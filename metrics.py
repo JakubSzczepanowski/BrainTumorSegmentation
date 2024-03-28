@@ -63,9 +63,37 @@ weights = np.array([0.00109971, 0.1458139, 0.5603247, 0.29276177]).reshape((1,1,
 # kWeights = K.constant(weights)
 class_weights = tf.constant([0.00109971, 0.1458139, 0.5603247, 0.29276177], dtype=tf.float32)
 
+class WeightedF1(tf.keras.losses.Loss):
+
+    def __init__(self, class_weights = class_weights, **kwargs):
+        super().__init__(**kwargs)
+        self.class_weights = class_weights
+    
+    def call(self, y_true, y_pred):
+        num_classes = K.shape(y_true)[-1]
+
+        f1_scores = []
+
+        for class_index in range(num_classes):
+            class_true = K.cast(y_true[:, :, :, class_index], dtype=tf.float32)
+            class_pred = y_pred[:, :, :, class_index]
+
+            class_true = K.flatten(class_true)
+            class_pred = K.flatten(class_pred)
+
+            f1 = 2 * (K.sum(class_true * class_pred)+ K.epsilon()) / (K.sum(class_true) + K.sum(class_pred) + K.epsilon())
+
+            weighted_f1 = f1 * self.class_weights[class_index]
+            f1_scores.append(weighted_f1)
+
+        f1_scores = tf.stack(f1_scores)
+        average_f1 = K.sum(f1_scores) / K.sum(self.class_weights + K.epsilon())
+
+        return 1 - average_f1
+
 def weighted_f1_loss(y_true, y_pred):
 
-    num_classes = K.int_shape(y_true)[-1]
+    num_classes = K.shape(y_true)[-1]
 
     f1_scores = []
 
