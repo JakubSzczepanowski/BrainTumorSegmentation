@@ -93,7 +93,7 @@ class WeightedF1(tf.keras.losses.Loss):
 
 def weighted_f1_loss(y_true, y_pred):
 
-    num_classes = K.shape(y_true)[-1]
+    num_classes = tf.shape(y_true)[-1]
 
     f1_scores = []
 
@@ -101,15 +101,15 @@ def weighted_f1_loss(y_true, y_pred):
         class_true = tf.cast(y_true[:, :, :, class_index], dtype=tf.float32)
         class_pred = y_pred[:, :, :, class_index]
 
-        class_true = K.flatten(class_true)
-        class_pred = K.flatten(class_pred)
+        class_true = tf.flatten(class_true)
+        class_pred = tf.flatten(class_pred)
 
-        f1 = 2 * (K.sum(class_true * class_pred)+ K.epsilon()) / (K.sum(class_true) + K.sum(class_pred) + K.epsilon())
+        f1 = 2 * (tf.reduce_sum(class_true * class_pred)+ K.epsilon()) / (tf.reduce_sum(class_true) + tf.reduce_sum(class_pred) + K.epsilon())
 
         weighted_f1 = f1 * class_weights[class_index]
         f1_scores.append(weighted_f1)
 
-    average_f1 = K.sum(f1_scores) / K.sum(class_weights + K.epsilon())
+    average_f1 = tf.reduce_sum(f1_scores) / tf.reduce_sum(class_weights + K.epsilon())
 
     return 1 - average_f1
 
