@@ -101,8 +101,8 @@ def weighted_f1_loss(y_true, y_pred):
         class_true = tf.cast(y_true[:, :, :, class_index], dtype=tf.float32)
         class_pred = y_pred[:, :, :, class_index]
 
-        class_true = tf.flatten(class_true)
-        class_pred = tf.flatten(class_pred)
+        class_true = tf.nest.flatten(class_true)
+        class_pred = tf.nest.flatten(class_pred)
 
         f1 = 2 * (tf.reduce_sum(class_true * class_pred)+ K.epsilon()) / (tf.reduce_sum(class_true) + tf.reduce_sum(class_pred) + K.epsilon())
 
