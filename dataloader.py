@@ -114,7 +114,7 @@ class DataGenerator(tf.keras.utils.Sequence):
                 for _ in range(self.sample_size):
                     
                     sample_index = tf.random.uniform(shape=(), minval=low, maxval=high, dtype=tf.int32).numpy() if self.layered else tf.random.uniform(shape=(), minval=self.offset, maxval=BRAIN_FRAMES - 1 - self.offset, dtype=tf.int32).numpy()
-                    aug = iaa.Affine(scale=(0.7, 1.3), rotate=(-180, 180)).to_deterministic()
+                    aug = iaa.Affine(scale=(0.9, 1.1), rotate=(-180, 180)).to_deterministic()
 
                     batch_X[batch_index, :, :, 0] = aug.augment_image(cv2.resize(brain_scan.t1.get_fdata(dtype=X_DTYPE)[:, :, sample_index], (IMAGE_SIZE, IMAGE_SIZE)))
                     batch_X[batch_index, :, :, 1] = aug.augment_image(cv2.resize(brain_scan.t1ce.get_fdata(dtype=X_DTYPE)[:, :, sample_index], (IMAGE_SIZE, IMAGE_SIZE)))
@@ -158,7 +158,7 @@ class DataGenerator(tf.keras.utils.Sequence):
                     batch_index += 1
             else:
                 for i in range(self.sample_size):
-                    aug = iaa.Affine(scale=(0.7, 1.3), rotate=(-180, 180)).to_deterministic()
+                    aug = iaa.Affine(scale=(0.9, 1.1), rotate=(-180, 180)).to_deterministic()
 
                     for channel in range(CHANNELS):
                         batch_X[batch_index, :, :, channel] = aug.augment_image(cv2.resize(X_cuts[channel][:, :, i], (IMAGE_SIZE, IMAGE_SIZE)))
