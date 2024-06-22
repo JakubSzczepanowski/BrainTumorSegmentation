@@ -1,5 +1,66 @@
 import tensorflow as tf
 import keras_cv
+
+class ChannelAttention(tf.keras.layers.Layer):
+    def __init__(self, reduction_ratio=16):
+        super(ChannelAttention, self).__init__()
+        self.reduction_ratio = reduction_ratio
+
+    def build(self, input_shape):
+        channels = input_shape[-1]
+        self.shared_layer_one = tf.keras.layers.Dense(channels // self.reduction_ratio,
+                                                      activation='relu',
+                                                      kernel_initializer='he_normal',
+                                                      use_bias=True,
+                                                      bias_initializer='zeros')
+        self.shared_layer_two = tf.keras.layers.Dense(channels,
+                                                      kernel_initializer='he_normal',
+                                                      use_bias=True,
+                                                      bias_initializer='zeros')
+
+    def call(self, inputs):
+        avg_pool = tf.reduce_mean(inputs, axis=[1, 2], keepdims=True)
+        avg_pool = self.shared_layer_one(avg_pool)
+        avg_pool = self.shared_layer_two(avg_pool)
+        
+        max_pool = tf.reduce_max(inputs, axis=[1, 2], keepdims=True)
+        max_pool = self.shared_layer_one(max_pool)
+        max_pool = self.shared_layer_two(max_pool)
+        
+        attention = tf.sigmoid(avg_pool + max_pool)
+        return inputs * attention
+
+class SpatialAttention(tf.keras.layers.Layer):
+    def __init__(self, kernel_size=7):
+        super(SpatialAttention, self).__init__()
+        self.kernel_size = kernel_size
+
+    def build(self, input_shape):
+        self.convolution = tf.keras.layers.Conv2D(filters=1,
+                                                  kernel_size=self.kernel_size,
+                                                  padding='same',
+                                                  kernel_initializer='he_normal',
+                                                  use_bias=False,
+                                                  activation='sigmoid')
+
+    def call(self, inputs):
+        avg_pool = tf.reduce_mean(inputs, axis=-1, keepdims=True)
+        max_pool = tf.reduce_max(inputs, axis=-1, keepdims=True)
+        combined = tf.concat([avg_pool, max_pool], axis=-1)
+        attention = self.convolution(combined)
+        return inputs * attention
+
+class CBAM(tf.keras.layers.Layer):
+    def __init__(self, reduction_ratio=16, kernel_size=7):
+        super(CBAM, self).__init__()
+        self.channel_attention = ChannelAttention(reduction_ratio)
+        self.spatial_attention = SpatialAttention(kernel_size)
+
+    def call(self, inputs):
+        channel_attention = self.channel_attention(inputs)
+        spatial_attention = self.spatial_attention(channel_attention)
+        return spatial_attention
+
     
 def build_conv_cascade(filters: int, drop_proba: float, drop_size: int) -> tf.keras.Sequential:
 
@@ -8,11 +69,11 @@ def build_conv_cascade(filters: int, drop_proba: float, drop_size: int) -> tf.ke
     return tf.keras.Sequential([
         tf.keras.layers.Conv2D(filters, 3, kernel_initializer=kernel_initializer, padding='same'),
         tf.keras.layers.BatchNormalization(),
-        tf.keras.layers.ReLU(),
+        tf.keras.layers.LeakyReLU(),
         keras_cv.layers.DropBlock2D(drop_proba, drop_size),
         tf.keras.layers.Conv2D(filters, 3, kernel_initializer=kernel_initializer, padding='same'),
         tf.keras.layers.BatchNormalization(),
-        tf.keras.layers.ReLU()
+        tf.keras.layers.LeakyReLU()
     ])
     
 def build_reduction_sequential(filters: int, drop_proba: float, drop_size: int, prev_node: tf.keras.layers.Layer):
@@ -28,17 +89,18 @@ def build_expansion_sequential(filters: int, drop_proba: float, drop_size: int, 
 
     e = tf.keras.layers.Conv2DTranspose(filters, 2, 2, 'same', kernel_initializer=kernel_initializer)(prev_node)
     e = tf.keras.layers.BatchNormalization()(e)
-    e = tf.keras.layers.ReLU()(e)
+    e = tf.keras.layers.LeakyReLU()(e)
+    concat_with = CBAM()(concat_with)
     e = tf.keras.layers.Concatenate()([e, concat_with])
 
     return tf.keras.Sequential([
         tf.keras.layers.Conv2D(filters, 3, 1, 'same', kernel_initializer=kernel_initializer),
         tf.keras.layers.BatchNormalization(),
-        tf.keras.layers.ReLU(),
+        tf.keras.layers.LeakyReLU(),
         keras_cv.layers.DropBlock2D(drop_proba, drop_size),
         tf.keras.layers.Conv2D(filters, 3, 1, 'same', kernel_initializer=kernel_initializer),
         tf.keras.layers.BatchNormalization(),
-        tf.keras.layers.ReLU()
+        tf.keras.layers.LeakyReLU()
     ])(e)
 
 def build_model(input_shape: tuple[int, int, int], num_classes: int) -> tf.keras.Model:
