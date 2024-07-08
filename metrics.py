@@ -61,7 +61,7 @@ def weighted_f1(y_true, y_pred):
 
 weights = np.array([0.00109971, 0.1458139, 0.5603247, 0.29276177]).reshape((1,1,1,4))
 # kWeights = K.constant(weights)
-class_weights = tf.constant([0.00109971, 0.1458139, 0.5603247, 0.29276177], dtype=tf.float32)
+class_weights = tf.constant([0.00098611, 0.15070848, 0.45178135, 0.39652405], dtype=tf.float32)
 
 class WeightedF1(tf.keras.losses.Loss):
 
