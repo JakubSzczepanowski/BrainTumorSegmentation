@@ -39,7 +39,7 @@ def build_resunet(input_shape, num_classes):
     s4, p4 = encoder_block(p3, 256, 0.3, 7)
     
     # Bottleneck
-    b = residual_block(p4, 512, 0.3, 10)
+    b = residual_block(p4, 512, 0.3, 8)
     
     # Decoder
     d4 = decoder_block(b, s4, 256, 0.3, 7)
