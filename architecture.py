@@ -3,8 +3,6 @@ import keras_cv
 import numpy as np
 import pywt
 
-from dataloader import X_DTYPE
-
 def residual_block(x, filters, drop_proba, drop_size):
     skip = x
     x = tf.keras.layers.Conv2D(filters, kernel_size=3, padding='same', kernel_initializer='he_normal')(x)
@@ -213,13 +211,13 @@ class WaveletPooling2D(tf.keras.layers.Layer):
                 coeffs2 = pywt.dwt2(image[:, :, c], 'haar')
                 LL, (LH, HL, HH) = coeffs2
                 transformed_channels.append(LL)
-            return np.stack(transformed_channels, axis=-1).astype(X_DTYPE)
+            return np.stack(transformed_channels, axis=-1).astype(tf.float32)
 
         def pywt_transform(inputs_numpy):
             transformed_images = [haar_wavelet_transform(image) for image in inputs_numpy]
             return np.stack(transformed_images, axis=0)
 
-        output = tf.py_function(func=pywt_transform, inp=[inputs], Tout=X_DTYPE)
+        output = tf.py_function(func=pywt_transform, inp=[inputs], Tout=tf.float32)
 
         batch_size, height, width, channels = inputs.shape
         output.set_shape((batch_size, height // 2, width // 2, channels))
