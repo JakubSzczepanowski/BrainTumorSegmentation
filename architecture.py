@@ -1,5 +1,9 @@
 import tensorflow as tf
 import keras_cv
+import numpy as np
+import pywt
+
+from dataloader import X_DTYPE
 
 def residual_block(x, filters, drop_proba, drop_size):
     skip = x
@@ -91,7 +95,7 @@ def down_sampling_block(x, filters, drop_proba, drop_size):
 
     filters_per_path = filters // 3
 
-    first_path = tf.keras.layers.MaxPooling2D()(x)
+    first_path = WaveletPooling2D()(x)
 
     sec_path = tf.keras.layers.Conv2D(filters_per_path, kernel_size=1, padding='same', kernel_initializer='he_normal')(x)
     sec_path = tf.keras.layers.LeakyReLU(0.01)(sec_path)
@@ -160,13 +164,17 @@ def dense_inception_block(x, filters, num_layers=3):
 
 def diu_encoder_block(x, filters, drop_proba, drop_size, block):
     x = block(x, filters)
+    x = CBAM()(x)
     p = down_sampling_block(x, filters, drop_proba, drop_size)
+    p = CBAM()(p)
     return x, p
 
 def diu_decoder_block(x, skip, filters, drop_proba, drop_size, block):
     x = up_sampling_block(x, filters, drop_proba, drop_size)
+    x = CBAM()(x)
     x = tf.keras.layers.Concatenate()([x, skip])
     x = block(x, filters)
+    x = CBAM()(x)
     return x
 
 def build_diunet(input_shape, num_classes):
@@ -192,6 +200,36 @@ def build_diunet(input_shape, num_classes):
     model = tf.keras.models.Model(inputs, outputs)
     return model
 
+
+class WaveletPooling2D(tf.keras.layers.Layer):
+    def __init__(self, **kwargs):
+        super(WaveletPooling2D, self).__init__(**kwargs)
+
+    def call(self, inputs):
+        def haar_wavelet_transform(image):
+            # image: [height, width, channels]
+            transformed_channels = []
+            for c in range(image.shape[-1]):
+                coeffs2 = pywt.dwt2(image[:, :, c], 'haar')
+                LL, (LH, HL, HH) = coeffs2
+                transformed_channels.append(LL)
+            return np.stack(transformed_channels, axis=-1).astype(X_DTYPE)
+
+        def pywt_transform(inputs_numpy):
+            transformed_images = [haar_wavelet_transform(image) for image in inputs_numpy]
+            return np.stack(transformed_images, axis=0)
+
+        output = tf.py_function(func=pywt_transform, inp=[inputs], Tout=X_DTYPE)
+
+        batch_size, height, width, channels = inputs.shape
+        output.set_shape((batch_size, height // 2, width // 2, channels))
+        
+        return output
+    
+    def compute_output_shape(self, input_shape):
+        return (input_shape[0], input_shape[1] // 2, input_shape[2] // 2, input_shape[3])
+
+
 class ChannelAttention(tf.keras.layers.Layer):
     def __init__(self, reduction_ratio=16):
         super(ChannelAttention, self).__init__()
@@ -201,13 +239,9 @@ class ChannelAttention(tf.keras.layers.Layer):
         channels = input_shape[-1]
         self.shared_layer_one = tf.keras.layers.Dense(channels // self.reduction_ratio,
                                                       activation='relu',
-                                                      kernel_initializer='he_normal',
-                                                      use_bias=True,
-                                                      bias_initializer='zeros')
+                                                      kernel_initializer='he_normal')
         self.shared_layer_two = tf.keras.layers.Dense(channels,
-                                                      kernel_initializer='he_normal',
-                                                      use_bias=True,
-                                                      bias_initializer='zeros')
+                                                      kernel_initializer='glorot_normal')
 
     def call(self, inputs):
         avg_pool = tf.reduce_mean(inputs, axis=[1, 2], keepdims=True)
@@ -230,8 +264,7 @@ class SpatialAttention(tf.keras.layers.Layer):
         self.convolution = tf.keras.layers.Conv2D(filters=1,
                                                   kernel_size=self.kernel_size,
                                                   padding='same',
-                                                  kernel_initializer='he_normal',
-                                                  use_bias=False,
+                                                  kernel_initializer='glorot_normal',
                                                   activation='sigmoid')
 
     def call(self, inputs):

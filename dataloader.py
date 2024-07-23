@@ -97,8 +97,8 @@ class DataGenerator(tf.keras.utils.Sequence):
     def __getitem__(self, idx):
         if self.bootstrap:
 
-            batch_X = np.zeros((self.batch_size, IMAGE_SIZE, IMAGE_SIZE, CHANNELS), dtype=X_DTYPE)
-            batch_Y = np.zeros((self.batch_size, IMAGE_SIZE, IMAGE_SIZE), dtype=Y_DTYPE)
+            batch_X = np.empty((self.batch_size, IMAGE_SIZE, IMAGE_SIZE, CHANNELS), dtype=X_DTYPE)
+            batch_Y = np.empty((self.batch_size, IMAGE_SIZE, IMAGE_SIZE), dtype=Y_DTYPE)
 
             ceil = BRAIN_FRAMES - self.offset
             batch_index = 0
@@ -134,8 +134,8 @@ class DataGenerator(tf.keras.utils.Sequence):
 
             self.cur_brain = self._load_brain(idx // self.batches_per_brain)
 
-        batch_X = np.zeros((self.batch_size, IMAGE_SIZE, IMAGE_SIZE, CHANNELS), dtype=X_DTYPE)
-        batch_Y = np.zeros((self.batch_size, IMAGE_SIZE, IMAGE_SIZE), dtype=Y_DTYPE)
+        batch_X = np.empty((self.batch_size, IMAGE_SIZE, IMAGE_SIZE, CHANNELS), dtype=X_DTYPE)
+        batch_Y = np.empty((self.batch_size, IMAGE_SIZE, IMAGE_SIZE), dtype=Y_DTYPE)
 
         batch_index = 0
         ceil = BRAIN_FRAMES - self.offset
