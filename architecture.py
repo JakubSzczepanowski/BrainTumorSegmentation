@@ -2,6 +2,7 @@ import tensorflow as tf
 import keras_cv
 import numpy as np
 import pywt
+import tensorflow_wavelets.Layers.DWT as DWT
 
 def residual_block(x, filters, drop_proba, drop_size):
     skip = x
@@ -93,7 +94,7 @@ def down_sampling_block(x, filters, drop_proba, drop_size):
 
     filters_per_path = filters // 3
 
-    first_path = WaveletPooling2D()(x)
+    first_path = DWT.DWT(wavelet_name='haar', concat=0)(x)
 
     sec_path = tf.keras.layers.Conv2D(filters_per_path, kernel_size=1, padding='same', kernel_initializer='he_normal')(x)
     sec_path = tf.keras.layers.LeakyReLU(0.01)(sec_path)
@@ -211,14 +212,16 @@ class WaveletPooling2D(tf.keras.layers.Layer):
                 coeffs2 = pywt.dwt2(image[:, :, c], 'haar')
                 LL, (LH, HL, HH) = coeffs2
                 transformed_channels.append(LL)
-            return np.stack(transformed_channels, axis=-1).astype(tf.float32)
+            return np.stack(transformed_channels, axis=-1).astype(np.float32)
 
         def pywt_transform(inputs_numpy):
             transformed_images = [haar_wavelet_transform(image) for image in inputs_numpy]
             return np.stack(transformed_images, axis=0)
 
-        output = tf.py_function(func=pywt_transform, inp=[inputs], Tout=tf.float32)
-
+        # Apply tf.numpy_function
+        output = tf.numpy_function(func=pywt_transform, inp=[inputs], Tout=np.float32)
+        
+        # Set shape information manually
         batch_size, height, width, channels = inputs.shape
         output.set_shape((batch_size, height // 2, width // 2, channels))
         
