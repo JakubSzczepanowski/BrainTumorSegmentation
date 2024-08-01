@@ -55,7 +55,7 @@ def build_resunet(input_shape, num_classes):
     model = tf.keras.models.Model(inputs, outputs)
     return model
 
-def inception_res_block(x, filters):
+def inception_res_block(x, filters, drop_proba, drop_size):
 
     filters_per_path = filters // 3
     skip = x
@@ -63,11 +63,52 @@ def inception_res_block(x, filters):
     first_path = tf.keras.layers.Conv2D(filters_per_path, kernel_size=1, padding='same', kernel_initializer='he_normal')(x)
     first_path = tf.keras.layers.BatchNormalization()(first_path)
     first_path = tf.keras.layers.LeakyReLU(0.01)(first_path)
+    first_path = keras_cv.layers.DropBlock2D(drop_proba, drop_size)(first_path)
 
-    sec_path = tf.keras.layers.MaxPooling2D(pool_size=2, strides=1, padding='same')(x)
+    sec_path = tf.keras.layers.Conv2D(filters_per_path, kernel_size=1, padding='same', kernel_initializer='he_normal')(x)
+    sec_path = tf.keras.layers.LeakyReLU(0.01)(sec_path)
+    sec_path = tf.keras.layers.Conv2D(filters_per_path, kernel_size=3, padding='same', kernel_initializer='he_normal')(sec_path)
+    sec_path = tf.keras.layers.BatchNormalization()(sec_path)
+    sec_path = tf.keras.layers.LeakyReLU(0.01)(sec_path)
+    sec_path = keras_cv.layers.DropBlock2D(drop_proba, drop_size)(sec_path)
+
+    third_path = tf.keras.layers.Conv2D(filters_per_path, kernel_size=1, padding='same', kernel_initializer='he_normal')(x)
+    third_path = tf.keras.layers.LeakyReLU(0.01)(third_path)
+    third_path = tf.keras.layers.Conv2D(filters_per_path, kernel_size=3, padding='same', kernel_initializer='he_normal')(third_path)
+    third_path = tf.keras.layers.BatchNormalization()(third_path)
+    third_path = tf.keras.layers.LeakyReLU(0.01)(third_path)
+    third_path = tf.keras.layers.Conv2D(filters_per_path, kernel_size=3, padding='same', kernel_initializer='he_normal')(third_path)
+    third_path = tf.keras.layers.BatchNormalization()(third_path)
+    third_path = tf.keras.layers.LeakyReLU(0.01)(third_path)
+    third_path = keras_cv.layers.DropBlock2D(drop_proba, drop_size)(third_path)
+
+    last_layer = tf.keras.layers.Concatenate()([first_path, sec_path, third_path])
+    last_layer = tf.keras.layers.Conv2D(filters, kernel_size=1, padding='same', kernel_initializer='he_normal')(last_layer)
+    last_layer = tf.keras.layers.BatchNormalization()(last_layer)
+
+    skip = tf.keras.layers.Conv2D(filters, kernel_size=1, padding='same', kernel_initializer='he_normal')(skip)
+    skip = tf.keras.layers.BatchNormalization()(skip)
+    
+    last_layer = tf.keras.layers.Add()([last_layer, skip])
+    last_layer = tf.keras.layers.LeakyReLU(0.01)(last_layer)
+
+    return last_layer
+
+def dense_inception_res_block(x, filters, drop_proba, drop_size):
+
+    filters_per_path = filters // 3
+    skip = x
+
+    first_path = tf.keras.layers.Conv2D(filters_per_path, kernel_size=1, padding='same', kernel_initializer='he_normal')(x)
+    first_path = tf.keras.layers.BatchNormalization()(first_path)
+    first_path = tf.keras.layers.LeakyReLU(0.01)(first_path)
+    first_path = keras_cv.layers.DropBlock2D(drop_proba, drop_size)(first_path)
+
+    sec_path = tf.keras.layers.MaxPooling2D(pool_size=3, strides=1, padding='same')(x)
     sec_path = tf.keras.layers.Conv2D(filters_per_path, kernel_size=1, padding='same', kernel_initializer='he_normal')(sec_path)
     sec_path = tf.keras.layers.BatchNormalization()(sec_path)
     sec_path = tf.keras.layers.LeakyReLU(0.01)(sec_path)
+    sec_path = keras_cv.layers.DropBlock2D(drop_proba, drop_size)(sec_path)
 
     third_path = tf.keras.layers.Conv2D(filters_per_path, kernel_size=1, padding='same', kernel_initializer='he_normal')(x)
     third_path = tf.keras.layers.LeakyReLU(0.01)(third_path)
@@ -77,6 +118,7 @@ def inception_res_block(x, filters):
     third_path = tf.keras.layers.Conv2D(filters_per_path, kernel_size=(3, 1), padding='same', kernel_initializer='he_normal')(third_path)
     third_path = tf.keras.layers.BatchNormalization()(third_path)
     third_path = tf.keras.layers.LeakyReLU(0.01)(third_path)
+    third_path = keras_cv.layers.DropBlock2D(drop_proba, drop_size)(third_path)
 
     last_layer = tf.keras.layers.Concatenate()([first_path, sec_path, third_path])
     last_layer = tf.keras.layers.Conv2D(filters, kernel_size=1, padding='same', kernel_initializer='he_normal')(last_layer)
@@ -99,21 +141,22 @@ def down_sampling_block(x, filters, drop_proba, drop_size):
     sec_path = tf.keras.layers.Conv2D(filters_per_path, kernel_size=1, padding='same', kernel_initializer='he_normal')(x)
     sec_path = tf.keras.layers.LeakyReLU(0.01)(sec_path)
     sec_path = tf.keras.layers.Conv2D(filters_per_path, kernel_size=3, strides=2, padding='same', kernel_initializer='he_normal')(sec_path)
-    sec_path = keras_cv.layers.DropBlock2D(drop_proba, drop_size)(sec_path)
     sec_path = tf.keras.layers.LeakyReLU(0.01)(sec_path)
+    sec_path = keras_cv.layers.DropBlock2D(drop_proba, drop_size)(sec_path)
 
     third_path = tf.keras.layers.Conv2D(filters_per_path, kernel_size=1, padding='same', kernel_initializer='he_normal')(x)
     third_path = tf.keras.layers.LeakyReLU(0.01)(third_path)
     third_path = tf.keras.layers.Conv2D(filters_per_path, kernel_size=3, padding='same', kernel_initializer='he_normal')(third_path)
     third_path = tf.keras.layers.LeakyReLU(0.01)(third_path)
     third_path = tf.keras.layers.Conv2D(filters_per_path, kernel_size=3, strides=2, padding='same', kernel_initializer='he_normal')(third_path)
-    third_path = keras_cv.layers.DropBlock2D(drop_proba, drop_size)(third_path)
     third_path = tf.keras.layers.LeakyReLU(0.01)(third_path)
+    third_path = keras_cv.layers.DropBlock2D(drop_proba, drop_size)(third_path)
 
     last_layer = tf.keras.layers.Concatenate()([first_path, sec_path, third_path])
     last_layer = tf.keras.layers.Conv2D(filters, kernel_size=1, padding='same', kernel_initializer='he_normal')(last_layer)
     last_layer = tf.keras.layers.BatchNormalization()(last_layer)
     last_layer = tf.keras.layers.LeakyReLU(0.01)(last_layer)
+    last_layer = keras_cv.layers.DropBlock2D(drop_proba, drop_size)(last_layer)
 
     return last_layer
 
@@ -126,21 +169,22 @@ def up_sampling_block(x, filters, drop_proba, drop_size):
     sec_path = tf.keras.layers.Conv2DTranspose(filters_per_path, kernel_size=1, padding='same', kernel_initializer='he_normal')(x)
     sec_path = tf.keras.layers.LeakyReLU(0.01)(sec_path)
     sec_path = tf.keras.layers.Conv2DTranspose(filters_per_path, kernel_size=3, strides=2, padding='same', kernel_initializer='he_normal')(sec_path)
-    sec_path = keras_cv.layers.DropBlock2D(drop_proba, drop_size)(sec_path)
     sec_path = tf.keras.layers.LeakyReLU(0.01)(sec_path)
+    sec_path = keras_cv.layers.DropBlock2D(drop_proba, drop_size)(sec_path)
 
     third_path = tf.keras.layers.Conv2DTranspose(filters_per_path, kernel_size=1, padding='same', kernel_initializer='he_normal')(x)
     third_path = tf.keras.layers.LeakyReLU(0.01)(third_path)
     third_path = tf.keras.layers.Conv2DTranspose(filters_per_path, kernel_size=3, padding='same', kernel_initializer='he_normal')(third_path)
     third_path = tf.keras.layers.LeakyReLU(0.01)(third_path)
     third_path = tf.keras.layers.Conv2DTranspose(filters_per_path, kernel_size=3, strides=2, padding='same', kernel_initializer='he_normal')(third_path)
-    third_path = keras_cv.layers.DropBlock2D(drop_proba, drop_size)(third_path)
     third_path = tf.keras.layers.LeakyReLU(0.01)(third_path)
+    third_path = keras_cv.layers.DropBlock2D(drop_proba, drop_size)(third_path)
 
     last_layer = tf.keras.layers.Concatenate()([first_path, sec_path, third_path])
     last_layer = tf.keras.layers.Conv2DTranspose(filters, kernel_size=1, padding='same', kernel_initializer='he_normal')(last_layer)
     last_layer = tf.keras.layers.BatchNormalization()(last_layer)
     last_layer = tf.keras.layers.LeakyReLU(0.01)(last_layer)
+    last_layer = keras_cv.layers.DropBlock2D(drop_proba, drop_size)(last_layer)
 
     return last_layer
 
@@ -150,11 +194,11 @@ def bottleneck_layer(x, filters):
     x = tf.keras.layers.LeakyReLU(0.01)(x)
     return x
 
-def dense_inception_block(x, filters, num_layers=3):
+def dense_inception_block(x, filters, drop_proba, drop_size, num_layers=3):
     inputs = [x]
 
     for i in range(num_layers):
-        x = inception_res_block(x, filters)
+        x = dense_inception_res_block(x, filters, drop_proba, drop_size)
         x = bottleneck_layer(x, filters)
         inputs.append(x)
         x = tf.keras.layers.Concatenate()(inputs)
@@ -162,7 +206,7 @@ def dense_inception_block(x, filters, num_layers=3):
     return x
 
 def diu_encoder_block(x, filters, drop_proba, drop_size, block):
-    x = block(x, filters)
+    x = block(x, filters, drop_proba, drop_size)
     x = CBAM()(x)
     p = down_sampling_block(x, filters, drop_proba, drop_size)
     p = CBAM()(p)
@@ -172,7 +216,7 @@ def diu_decoder_block(x, skip, filters, drop_proba, drop_size, block):
     x = up_sampling_block(x, filters, drop_proba, drop_size)
     x = CBAM()(x)
     x = tf.keras.layers.Concatenate()([x, skip])
-    x = block(x, filters)
+    x = block(x, filters, drop_proba, drop_size)
     x = CBAM()(x)
     return x
 
@@ -180,19 +224,19 @@ def build_diunet(input_shape, num_classes):
     inputs = tf.keras.layers.Input(input_shape)
     
     # Encoder
-    s1, p1 = diu_encoder_block(inputs, 32, 0, 1, inception_res_block)
+    s1, p1 = diu_encoder_block(inputs, 32, 0.05, 2, inception_res_block)
     s2, p2 = diu_encoder_block(p1, 64, 0.1, 3, inception_res_block)
-    s3, p3 = diu_encoder_block(p2, 128, 0.2, 5, inception_res_block)
-    s4, p4 = diu_encoder_block(p3, 256, 0.3, 7, dense_inception_block)
+    s3, p3 = diu_encoder_block(p2, 128, 0.15, 5, inception_res_block)
+    s4, p4 = diu_encoder_block(p3, 256, 0.2, 5, dense_inception_block)
     
     # Bottleneck
-    b = dense_inception_block(p4, 512)
+    b = dense_inception_block(p4, 512, 0.2, 5)
     
     # Decoder
-    d4 = diu_decoder_block(b, s4, 256, 0.3, 7, dense_inception_block)
-    d3 = diu_decoder_block(d4, s3, 128, 0.2, 5, inception_res_block)
+    d4 = diu_decoder_block(b, s4, 256, 0.2, 5, dense_inception_block)
+    d3 = diu_decoder_block(d4, s3, 128, 0.15, 5, inception_res_block)
     d2 = diu_decoder_block(d3, s2, 64, 0.1, 3, inception_res_block)
-    d1 = diu_decoder_block(d2, s1, 32, 0, 1, inception_res_block)
+    d1 = diu_decoder_block(d2, s1, 32, 0.05, 2, inception_res_block)
     
     outputs = tf.keras.layers.Conv2D(num_classes, kernel_size=1, activation='softmax')(d1)
     
@@ -243,6 +287,7 @@ class ChannelAttention(tf.keras.layers.Layer):
                                                       kernel_initializer='he_normal')
         self.shared_layer_two = tf.keras.layers.Dense(channels,
                                                       kernel_initializer='glorot_normal')
+        super().build(input_shape)
 
     def call(self, inputs):
         avg_pool = tf.reduce_mean(inputs, axis=[1, 2], keepdims=True)
@@ -267,6 +312,7 @@ class SpatialAttention(tf.keras.layers.Layer):
                                                   padding='same',
                                                   kernel_initializer='glorot_normal',
                                                   activation='sigmoid')
+        super().build(input_shape)
 
     def call(self, inputs):
         avg_pool = tf.reduce_mean(inputs, axis=-1, keepdims=True)
@@ -276,10 +322,16 @@ class SpatialAttention(tf.keras.layers.Layer):
         return inputs * attention
 
 class CBAM(tf.keras.layers.Layer):
-    def __init__(self, reduction_ratio=16, kernel_size=7):
-        super(CBAM, self).__init__()
-        self.channel_attention = ChannelAttention(reduction_ratio)
-        self.spatial_attention = SpatialAttention(kernel_size)
+    def __init__(self, reduction_ratio=16, kernel_size=7, **kwargs):
+        super(CBAM, self).__init__(**kwargs)
+        self.reduction_ratio = reduction_ratio
+        self.kernel_size = kernel_size
+
+    def build(self, input_shape):
+        self.channel_attention = ChannelAttention(self.reduction_ratio)
+        self.spatial_attention = SpatialAttention(self.kernel_size)
+
+        super().build(input_shape)
 
     def call(self, inputs):
         channel_attention = self.channel_attention(inputs)

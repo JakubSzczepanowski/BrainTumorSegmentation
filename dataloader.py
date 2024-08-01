@@ -126,6 +126,35 @@ class DataGenerator(tf.keras.utils.Sequence):
 
                     batch_index += 1
 
+            blank_frames = self.batch_size - self.sample_size * self.brain_slices
+
+            if blank_frames > 0:
+
+                growth_section = self.brain_slices / blank_frames
+
+                for layer_num in [int(layer * growth_section) for layer in range(blank_frames)]:
+
+                    low = max(layer_num * self.slice_size + self.offset - 1, 0)
+                    high = min(low + self.slice_size + 1, ceil)
+
+                    brain_scan_index = tf.random.uniform(shape=(), maxval=self.hgg_size, dtype=tf.int32).numpy() if is_hgg else tf.random.uniform(shape=(), minval=self.hgg_size, maxval=(self.hgg_size + self.lgg_size), dtype=tf.int32).numpy()
+                    brain_scan = self._load_brain(brain_scan_index)
+                    is_hgg = not is_hgg
+                    
+                    sample_index = tf.random.uniform(shape=(), minval=low, maxval=high, dtype=tf.int32).numpy() if self.layered else tf.random.uniform(shape=(), minval=self.offset, maxval=BRAIN_FRAMES - 1 - self.offset, dtype=tf.int32).numpy()
+                    aug = iaa.Affine(scale=(0.9, 1.1), rotate=(-180, 180)).to_deterministic()
+
+                    batch_X[batch_index, :, :, 0] = aug.augment_image(cv2.resize(brain_scan.t1.get_fdata(dtype=X_DTYPE)[:, :, sample_index], (IMAGE_SIZE, IMAGE_SIZE)))
+                    batch_X[batch_index, :, :, 1] = aug.augment_image(cv2.resize(brain_scan.t1ce.get_fdata(dtype=X_DTYPE)[:, :, sample_index], (IMAGE_SIZE, IMAGE_SIZE)))
+                    batch_X[batch_index, :, :, 2] = aug.augment_image(cv2.resize(brain_scan.t2.get_fdata(dtype=X_DTYPE)[:, :, sample_index], (IMAGE_SIZE, IMAGE_SIZE)))
+                    batch_X[batch_index, :, :, 3] = aug.augment_image(cv2.resize(brain_scan.flair.get_fdata(dtype=X_DTYPE)[:, :, sample_index], (IMAGE_SIZE, IMAGE_SIZE)))
+                    y_map = DataGenerator._map_labels(brain_scan.seg.get_fdata(dtype=X_DTYPE)[:, :, sample_index])
+                    
+                    batch_Y[batch_index, :, :] = aug.augment_image(cv2.resize(y_map, (IMAGE_SIZE, IMAGE_SIZE)))
+
+                    batch_index += 1
+                
+
             return batch_X/self.max_value, tf.one_hot(batch_Y, 4, dtype=Y_DTYPE)
 
         step = idx % self.batches_per_brain
