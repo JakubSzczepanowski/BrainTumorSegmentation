@@ -74,6 +74,14 @@ class DataGenerator(tf.keras.utils.Sequence):
         if bootstrap:
             self.hgg_size = hgg_size
             self.lgg_size = lgg_size
+        
+        self.blank_frames = self.batch_size - self.sample_size * self.brain_slices
+
+        if self.blank_frames > 0:
+
+            growth_section = self.brain_slices / self.blank_frames
+
+            self.missing_layers = [int(layer * growth_section) for layer in range(self.blank_frames)]
 
     @lru_cache(maxsize=32)
     def _load_brain(self, idx) -> Brain:
@@ -111,35 +119,11 @@ class DataGenerator(tf.keras.utils.Sequence):
                 brain_scan = self._load_brain(brain_scan_index)
                 is_hgg = not is_hgg
 
-                for _ in range(self.sample_size):
-                    
-                    sample_index = tf.random.uniform(shape=(), minval=low, maxval=high, dtype=tf.int32).numpy() if self.layered else tf.random.uniform(shape=(), minval=self.offset, maxval=BRAIN_FRAMES - 1 - self.offset, dtype=tf.int32).numpy()
-                    aug = iaa.Affine(scale=(0.9, 1.1), rotate=(-180, 180)).to_deterministic()
+                samples_for_slice = self.sample_size
+                if slice in self.missing_layers:
+                    samples_for_slice += 1
 
-                    batch_X[batch_index, :, :, 0] = aug.augment_image(cv2.resize(brain_scan.t1.get_fdata(dtype=X_DTYPE)[:, :, sample_index], (IMAGE_SIZE, IMAGE_SIZE)))
-                    batch_X[batch_index, :, :, 1] = aug.augment_image(cv2.resize(brain_scan.t1ce.get_fdata(dtype=X_DTYPE)[:, :, sample_index], (IMAGE_SIZE, IMAGE_SIZE)))
-                    batch_X[batch_index, :, :, 2] = aug.augment_image(cv2.resize(brain_scan.t2.get_fdata(dtype=X_DTYPE)[:, :, sample_index], (IMAGE_SIZE, IMAGE_SIZE)))
-                    batch_X[batch_index, :, :, 3] = aug.augment_image(cv2.resize(brain_scan.flair.get_fdata(dtype=X_DTYPE)[:, :, sample_index], (IMAGE_SIZE, IMAGE_SIZE)))
-                    y_map = DataGenerator._map_labels(brain_scan.seg.get_fdata(dtype=X_DTYPE)[:, :, sample_index])
-                    
-                    batch_Y[batch_index, :, :] = aug.augment_image(cv2.resize(y_map, (IMAGE_SIZE, IMAGE_SIZE)))
-
-                    batch_index += 1
-
-            blank_frames = self.batch_size - self.sample_size * self.brain_slices
-
-            if blank_frames > 0:
-
-                growth_section = self.brain_slices / blank_frames
-
-                for layer_num in [int(layer * growth_section) for layer in range(blank_frames)]:
-
-                    low = max(layer_num * self.slice_size + self.offset - 1, 0)
-                    high = min(low + self.slice_size + 1, ceil)
-
-                    brain_scan_index = tf.random.uniform(shape=(), maxval=self.hgg_size, dtype=tf.int32).numpy() if is_hgg else tf.random.uniform(shape=(), minval=self.hgg_size, maxval=(self.hgg_size + self.lgg_size), dtype=tf.int32).numpy()
-                    brain_scan = self._load_brain(brain_scan_index)
-                    is_hgg = not is_hgg
+                for _ in range(samples_for_slice):
                     
                     sample_index = tf.random.uniform(shape=(), minval=low, maxval=high, dtype=tf.int32).numpy() if self.layered else tf.random.uniform(shape=(), minval=self.offset, maxval=BRAIN_FRAMES - 1 - self.offset, dtype=tf.int32).numpy()
                     aug = iaa.Affine(scale=(0.9, 1.1), rotate=(-180, 180)).to_deterministic()
@@ -193,6 +177,33 @@ class DataGenerator(tf.keras.utils.Sequence):
                         batch_X[batch_index, :, :, channel] = aug.augment_image(cv2.resize(X_cuts[channel][:, :, i], (IMAGE_SIZE, IMAGE_SIZE)))
                     
                     batch_Y[batch_index, :, :] = aug.augment_image(cv2.resize(seg_cut[:, :, i], (IMAGE_SIZE, IMAGE_SIZE)))
+                    batch_index += 1
+
+        if self.blank_frames > 0:
+            for slice in self.missing_layers:
+                low = max(slice * self.slice_size + step * self.sample_size + self.offset - 1, 0)
+                high = min(low + self.sample_size, ceil)
+                middle_index = (low + high) // 2
+                t1_cut = self.cur_brain.t1.get_fdata(dtype=X_DTYPE)[:, :, middle_index]
+                t1ce_cut = self.cur_brain.t1ce.get_fdata(dtype=X_DTYPE)[:, :, middle_index]
+                t2_cut = self.cur_brain.t2.get_fdata(dtype=X_DTYPE)[:, :, middle_index]
+                flair_cut = self.cur_brain.flair.get_fdata(dtype=X_DTYPE)[:, :, middle_index]
+                seg_cut = DataGenerator._map_labels(self.cur_brain.seg.get_fdata(dtype=X_DTYPE)[:, :, middle_index])
+                X_cuts = (t1_cut, t1ce_cut, t2_cut, flair_cut)
+
+                if self.no_augment:
+                    for channel in range(CHANNELS):
+                        batch_X[batch_index, :, :, channel] = cv2.resize(X_cuts[channel], (IMAGE_SIZE, IMAGE_SIZE))
+                    
+                    batch_Y[batch_index, :, :] = cv2.resize(seg_cut, (IMAGE_SIZE, IMAGE_SIZE))
+                    batch_index += 1
+                else:
+                    aug = iaa.Affine(scale=(0.9, 1.1), rotate=(-180, 180)).to_deterministic()
+
+                    for channel in range(CHANNELS):
+                        batch_X[batch_index, :, :, channel] = aug.augment_image(cv2.resize(X_cuts[channel], (IMAGE_SIZE, IMAGE_SIZE)))
+                    
+                    batch_Y[batch_index, :, :] = aug.augment_image(cv2.resize(seg_cut, (IMAGE_SIZE, IMAGE_SIZE)))
                     batch_index += 1
 
         return batch_X/self.max_value, tf.one_hot(batch_Y, 4, dtype=Y_DTYPE)
