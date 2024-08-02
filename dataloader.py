@@ -76,6 +76,7 @@ class DataGenerator(tf.keras.utils.Sequence):
             self.lgg_size = lgg_size
         
         self.blank_frames = self.batch_size - self.sample_size * self.brain_slices
+        self.missing_layers = None
 
         if self.blank_frames > 0:
 
@@ -120,7 +121,7 @@ class DataGenerator(tf.keras.utils.Sequence):
                 is_hgg = not is_hgg
 
                 samples_for_slice = self.sample_size
-                if slice in self.missing_layers:
+                if self.missing_layers is not None and slice in self.missing_layers:
                     samples_for_slice += 1
 
                 for _ in range(samples_for_slice):
