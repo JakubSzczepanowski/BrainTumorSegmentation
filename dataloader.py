@@ -53,13 +53,13 @@ def extend_path_from_last_part(path: str) -> str:
 
 class DataGenerator(tf.keras.utils.Sequence):
 
-    def __init__(self, dataset_paths: list[str], max_value: int, batch_size: int = 32, brain_slices: int = 8, bootstrap: bool = True, layered: bool = True, no_augment: bool = False, offset: tuple[int, int] = (44, 40), hgg_size: int = None, lgg_size: int = None):
+    def __init__(self, dataset_paths: list[str], max_value: int, batch_size: int = 32, brain_slices: int = 8, bootstrap: bool = True, layered: bool = True, no_augment: bool = False, offset: tuple[int, int] = (40, 40), hgg_size: int = None, lgg_size: int = None, contextual: bool = False, context_size: int = 0):
         self.dataset_paths = [extend_path_from_last_part(path).decode('ASCII') for path in dataset_paths]
         self.brain_slices = brain_slices
         self.batch_size = batch_size
         self.sample_size = self.batch_size//self.brain_slices
         
-        self.batches_per_brain = (BRAIN_FRAMES - sum(offset))//self.batch_size
+        self.batches_per_brain = (BRAIN_FRAMES - sum(offset)) // self.batch_size
         self.cutted_frames = self.batches_per_brain * self.batch_size
         self.slice_size = self.cutted_frames//brain_slices
         self.cur_brain: Brain = None
@@ -68,10 +68,14 @@ class DataGenerator(tf.keras.utils.Sequence):
         self.bootstrap = bootstrap
         self.layered = layered
         self.no_augment = no_augment
-        self.offset = offset
-        if bootstrap:
-            self.hgg_size = hgg_size
-            self.lgg_size = lgg_size
+        self.left_offset, self.right_offset = offset
+        self.contextual = contextual
+        self.context_size = context_size
+        if self.contextual:
+            self.is_hgg = True
+            self.diversity_size = (BRAIN_FRAMES - sum(offset)) // context_size
+        self.hgg_size = hgg_size
+        self.lgg_size = lgg_size
         
         self.blank_frames = self.batch_size - self.sample_size * self.brain_slices
         self.missing_layers = None
@@ -82,7 +86,7 @@ class DataGenerator(tf.keras.utils.Sequence):
 
             self.missing_layers = [int(layer * growth_section) for layer in range(self.blank_frames)]
 
-    @lru_cache(maxsize=32)
+    @lru_cache(maxsize=24)
     def _load_brain(self, idx) -> Brain:
         path = self.dataset_paths[idx]
         t1ce = nib.load(f'{path}_t1ce.nii')
@@ -100,16 +104,17 @@ class DataGenerator(tf.keras.utils.Sequence):
         return len(self.dataset_paths) * self.batches_per_brain
 
     def __getitem__(self, idx):
+
         if self.bootstrap:
 
             batch_X = np.zeros((self.batch_size, IMAGE_SIZE, IMAGE_SIZE, CHANNELS), dtype=X_DTYPE)
             batch_Y = np.zeros((self.batch_size, IMAGE_SIZE, IMAGE_SIZE), dtype=Y_DTYPE)
 
-            ceil = BRAIN_FRAMES - self.offset[1]
+            ceil = BRAIN_FRAMES - self.right_offset
             batch_index = 0
             is_hgg = True
             for slice in range(self.brain_slices):
-                low = max(slice * self.slice_size + self.offset[0] - 1, 0)
+                low = max(slice * self.slice_size + self.left_offset - 1, 0)
                 high = min(low + self.slice_size + 1, ceil)
 
                 brain_scan_index = tf.random.uniform(shape=(), maxval=self.hgg_size, dtype=tf.int32).numpy() if is_hgg else tf.random.uniform(shape=(), minval=self.hgg_size, maxval=(self.hgg_size + self.lgg_size), dtype=tf.int32).numpy()
@@ -122,7 +127,7 @@ class DataGenerator(tf.keras.utils.Sequence):
 
                 for _ in range(samples_for_slice):
                     
-                    sample_index = tf.random.uniform(shape=(), minval=low, maxval=high, dtype=tf.int32).numpy() if self.layered else tf.random.uniform(shape=(), minval=self.offset[0], maxval=BRAIN_FRAMES - 1 - self.offset[1], dtype=tf.int32).numpy()
+                    sample_index = tf.random.uniform(shape=(), minval=low, maxval=high, dtype=tf.int32).numpy() if self.layered else tf.random.uniform(shape=(), minval=self.left_offset, maxval=BRAIN_FRAMES - 1 - self.right_offset, dtype=tf.int32).numpy()
                     aug = iaa.Affine(scale=(0.9, 1.1), rotate=(-180, 180)).to_deterministic()
 
                     batch_X[batch_index, :, :, 0] = aug.augment_image(cv2.resize(brain_scan.t1ce.get_fdata(dtype=X_DTYPE)[:, :, sample_index], (IMAGE_SIZE, IMAGE_SIZE)))
@@ -133,6 +138,46 @@ class DataGenerator(tf.keras.utils.Sequence):
 
                     batch_index += 1
                 
+
+            return batch_X/self.max_value, tf.one_hot(batch_Y, 4, dtype=Y_DTYPE)
+        
+        if self.contextual:
+
+            batch_size = self.context_size * self.diversity_size
+            batch_X = np.zeros((batch_size, IMAGE_SIZE, IMAGE_SIZE, CHANNELS), dtype=X_DTYPE)
+            batch_Y = np.zeros((batch_size, IMAGE_SIZE, IMAGE_SIZE), dtype=Y_DTYPE)
+
+            batch_index = 0
+            ceil = BRAIN_FRAMES - self.right_offset
+
+            for case in range(self.diversity_size):
+                brain_scan_index = tf.random.uniform(shape=(), maxval=self.hgg_size, dtype=tf.int32).numpy() if self.is_hgg else tf.random.uniform(shape=(), minval=self.hgg_size, maxval=(self.hgg_size + self.lgg_size), dtype=tf.int32).numpy()
+                brain_scan = self._load_brain(brain_scan_index)
+                self.is_hgg = not self.is_hgg
+
+                low = max(case * self.context_size + self.left_offset - 1, 0)
+                high = min(low + self.context_size, ceil)
+                t1ce_cut = brain_scan.t1ce.get_fdata(dtype=X_DTYPE)[:, :, low : high]
+                flair_cut = brain_scan.flair.get_fdata(dtype=X_DTYPE)[:, :, low : high]
+                seg_cut = DataGenerator._map_labels(brain_scan.seg.get_fdata(dtype=X_DTYPE)[:, :, low : high])
+                X_cuts = (t1ce_cut, flair_cut)
+
+                if self.no_augment:
+                    for i in range(self.context_size):
+                        for channel in range(CHANNELS):
+                            batch_X[batch_index, :, :, channel] = cv2.resize(X_cuts[channel][:, :, i], (IMAGE_SIZE, IMAGE_SIZE))
+                        
+                        batch_Y[batch_index, :, :] = cv2.resize(seg_cut[:, :, i], (IMAGE_SIZE, IMAGE_SIZE))
+                        batch_index += 1
+                else:
+                    for i in range(self.context_size):
+                        aug = iaa.Affine(scale=(0.9, 1.1), rotate=(-180, 180)).to_deterministic()
+
+                        for channel in range(CHANNELS):
+                            batch_X[batch_index, :, :, channel] = aug.augment_image(cv2.resize(X_cuts[channel][:, :, i], (IMAGE_SIZE, IMAGE_SIZE)))
+                        
+                        batch_Y[batch_index, :, :] = aug.augment_image(cv2.resize(seg_cut[:, :, i], (IMAGE_SIZE, IMAGE_SIZE)))
+                        batch_index += 1
 
             return batch_X/self.max_value, tf.one_hot(batch_Y, 4, dtype=Y_DTYPE)
 
@@ -146,16 +191,14 @@ class DataGenerator(tf.keras.utils.Sequence):
         batch_Y = np.zeros((self.batch_size, IMAGE_SIZE, IMAGE_SIZE), dtype=Y_DTYPE)
 
         batch_index = 0
-        ceil = BRAIN_FRAMES - self.offset[1]
+        ceil = BRAIN_FRAMES - self.right_offset
         for slice in range(self.brain_slices):
-            low = max(slice * self.slice_size + step * self.sample_size + self.offset[0] - 1, 0)
+            low = max(slice * self.slice_size + step * self.sample_size + self.left_offset - 1, 0)
             high = min(low + self.sample_size, ceil)
-            t1_cut = self.cur_brain.t1.get_fdata(dtype=X_DTYPE)[:, :, low : high]
             t1ce_cut = self.cur_brain.t1ce.get_fdata(dtype=X_DTYPE)[:, :, low : high]
-            t2_cut = self.cur_brain.t2.get_fdata(dtype=X_DTYPE)[:, :, low : high]
             flair_cut = self.cur_brain.flair.get_fdata(dtype=X_DTYPE)[:, :, low : high]
             seg_cut = DataGenerator._map_labels(self.cur_brain.seg.get_fdata(dtype=X_DTYPE)[:, :, low : high])
-            X_cuts = (t1_cut, t1ce_cut, t2_cut, flair_cut)
+            X_cuts = (t1ce_cut, flair_cut)
 
             if self.no_augment:
                 for i in range(self.sample_size):
@@ -176,15 +219,13 @@ class DataGenerator(tf.keras.utils.Sequence):
 
         if self.blank_frames > 0:
             for slice in self.missing_layers:
-                low = max(slice * self.slice_size + step * self.sample_size + self.offset[0] - 1, 0)
+                low = max(slice * self.slice_size + step * self.sample_size + self.left_offset - 1, 0)
                 high = min(low + self.sample_size, ceil)
                 middle_index = (low + high) // 2
-                t1_cut = self.cur_brain.t1.get_fdata(dtype=X_DTYPE)[:, :, middle_index]
                 t1ce_cut = self.cur_brain.t1ce.get_fdata(dtype=X_DTYPE)[:, :, middle_index]
-                t2_cut = self.cur_brain.t2.get_fdata(dtype=X_DTYPE)[:, :, middle_index]
                 flair_cut = self.cur_brain.flair.get_fdata(dtype=X_DTYPE)[:, :, middle_index]
                 seg_cut = DataGenerator._map_labels(self.cur_brain.seg.get_fdata(dtype=X_DTYPE)[:, :, middle_index])
-                X_cuts = (t1_cut, t1ce_cut, t2_cut, flair_cut)
+                X_cuts = (t1ce_cut, flair_cut)
 
                 if self.no_augment:
                     for channel in range(CHANNELS):
@@ -209,8 +250,8 @@ class DataGenerator(tf.keras.utils.Sequence):
     def __exit__(self, exc_type, exc_val, exc_tb):
         self._load_brain.cache_clear()
 
-def build_data_generator(dataset_paths: list[str], max_value: int, batch_size: int = 32, brain_slices: int = 8, bootstrap: bool = True, layered: bool = True, no_augment: bool = False, offset: tuple[int, int] = (44, 40), hgg_size: int = None, lgg_size: int = None) -> Iterator[tuple[np.ndarray, tf.Tensor]]:
-    with DataGenerator(dataset_paths, max_value, batch_size, brain_slices, bootstrap, layered, no_augment, offset, hgg_size, lgg_size) as generator:
+def build_data_generator(dataset_paths: list[str], max_value: int, batch_size: int = 32, brain_slices: int = 8, bootstrap: bool = True, layered: bool = True, no_augment: bool = False, offset: tuple[int, int] = (44, 40), hgg_size: int = None, lgg_size: int = None, contextual: bool = False, context_size: int = 0) -> Iterator[tuple[np.ndarray, tf.Tensor]]:
+    with DataGenerator(dataset_paths, max_value, batch_size, brain_slices, bootstrap, layered, no_augment, offset, hgg_size, lgg_size, contextual, context_size) as generator:
 
         for i in range(generator.len):
             yield generator.__getitem__(i)
