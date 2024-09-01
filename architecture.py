@@ -55,6 +55,30 @@ def build_resunet(input_shape, num_classes):
     model = tf.keras.models.Model(inputs, outputs)
     return model
 
+
+class DWT_Layer(tf.keras.layers.Layer):
+    def __init__(self, wavelet_name='haar', **kwargs):
+        super(DWT_Layer, self).__init__(**kwargs)
+        self.wavelet_name = wavelet_name
+
+    def build(self, input_shape):
+        # Utwórz warstwę DWT w metodzie build
+        self.dwt_layer = DWT.DWT(wavelet_name=self.wavelet_name, concat=0)
+        super(DWT_Layer, self).build(input_shape)
+
+    def call(self, inputs):
+        # Użyj warstwy DWT
+        trans = self.dwt_layer(inputs)
+        
+        # Zachowaj tylko kanały LL (pierwsze 1/4 kanałów)
+        trans_LL = trans[:, :, :, :inputs.shape[-1]]
+
+        return trans_LL
+
+    def compute_output_shape(self, input_shape):
+        # Określ rozmiar wyjścia
+        return (input_shape[0], input_shape[1] // 2, input_shape[2] // 2, input_shape[3])
+
 def inception_res_block(x, filters, drop_proba, drop_size):
 
     filters_per_path = filters // 3
@@ -136,7 +160,7 @@ def down_sampling_block(x, filters, drop_proba, drop_size):
 
     filters_per_path = filters // 3
 
-    first_path = DWT.DWT(wavelet_name='haar', concat=0)(x)
+    first_path = DWT_Layer()(x)
 
     sec_path = tf.keras.layers.Conv2D(filters_per_path, kernel_size=1, padding='same', kernel_initializer='he_normal')(x)
     sec_path = tf.keras.layers.LeakyReLU(0.01)(sec_path)

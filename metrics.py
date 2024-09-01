@@ -91,6 +91,29 @@ class WeightedF1(tf.keras.losses.Loss):
 
         return 1 - average_f1
 
+def f1_loss(y_true, y_pred):
+#     if tf.is_symbolic_tensor(y_true) or tf.is_symbolic_tensor(y_true):
+#         return y_true, y_pred
+
+    num_classes = y_true.get_shape().as_list()[-1]
+
+    f1_scores = []
+
+    for class_index in range(num_classes):
+        class_true = tf.cast(y_true[:, :, :, class_index], dtype=tf.float32)
+        class_pred = y_pred[:, :, :, class_index]
+
+        class_true = tf.reshape(class_true, [-1])
+        class_pred = tf.reshape(class_pred, [-1])
+
+        f1 = 2 * (tf.reduce_sum(class_true * class_pred)+ K.epsilon()) / (tf.reduce_sum(class_true) + tf.reduce_sum(class_pred) + K.epsilon())
+
+        f1_scores.append(f1)
+
+    average_f1 = tf.reduce_sum(f1_scores) / len(f1_scores)
+
+    return 1 - average_f1
+
 def weighted_f1_loss(y_true, y_pred):
 
     num_classes = y_true.get_shape().as_list()[-1]
