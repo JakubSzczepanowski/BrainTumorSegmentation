@@ -104,6 +104,7 @@ class DataGenerator(tf.keras.utils.Sequence):
 
     def __getitem__(self, idx):
 
+        # GENERACJA LOSOWA I WARSTWOWO-LOSOWA
         if self.bootstrap:
 
             batch_X = np.zeros((self.batch_size, IMAGE_SIZE, IMAGE_SIZE, CHANNELS), dtype=X_DTYPE)
@@ -138,6 +139,7 @@ class DataGenerator(tf.keras.utils.Sequence):
 
             return batch_X/self.max_value, tf.one_hot(batch_Y, 4, dtype=Y_DTYPE)
         
+        # GENERACJA KONTEKSTUALNA
         if self.contextual:
 
             batch_size = self.context_size * self.diversity_size
@@ -178,6 +180,7 @@ class DataGenerator(tf.keras.utils.Sequence):
 
             return batch_X/self.max_value, tf.one_hot(batch_Y, 4, dtype=Y_DTYPE)
 
+        # GENERACJA WARSTWOWO-SEKWENCYJNA
         step = idx % self.batches_per_brain
 
         if step == 0:
